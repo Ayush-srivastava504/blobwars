@@ -1,0 +1,43 @@
+{
+  "name": "@blobwars/backend",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json --noEmit",
+    "start": "tsx src/index.ts",
+    "prisma:generate": "prisma generate --schema=../database/schema.prisma",
+    "prisma:migrate": "prisma migrate deploy --schema=../database/schema.prisma"
+  },
+  "dependencies": {
+    "@blobwars/shared": "*",
+    "@colyseus/core": "^0.15.42",
+    "@colyseus/monitor": "^0.15.7",
+    "@colyseus/redis-driver": "^0.15.9",
+    "@colyseus/redis-presence": "^0.15.4",
+    "@colyseus/schema": "^2.0.35",
+    "@colyseus/tools": "^0.15.14",
+    "@colyseus/ws-transport": "^0.15.4",
+    "@prisma/client": "^5.20.0",
+    "bcryptjs": "^2.4.3",
+    "colyseus": "^0.15.42",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "google-auth-library": "^9.14.1",
+    "ioredis": "^5.4.1",
+    "jsonwebtoken": "^9.0.2",
+    "nanoid": "^3.3.7",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/node": "^22.5.5",
+    "prisma": "^5.20.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2"
+  }
+}

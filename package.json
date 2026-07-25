@@ -1,0 +1,5 @@
+{
+  "name": "blobwars",
+  "private": true,
+  "workspaces": ["frontend", "backend", "shared"]
+}

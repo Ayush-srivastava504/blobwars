@@ -1,0 +1,112 @@
+// Prisma schema — PostgreSQL
+// Run: npx prisma migrate dev --name init  (from /database, with DATABASE_URL set)
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../backend/node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AuthProvider {
+  GUEST
+  GOOGLE
+}
+
+model User {
+  id            String       @id @default(uuid())
+  username      String       @unique
+  displayName   String
+  email         String?      @unique
+  authProvider  AuthProvider @default(GUEST)
+  googleId      String?      @unique
+  avatarUrl     String?
+  isGuest       Boolean      @default(true)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  lastLoginAt   DateTime     @default(now())
+
+  stats         PlayerStats?
+  matchPlayers  MatchPlayer[]
+  ownedRooms    Room[]        @relation("RoomOwner")
+
+  @@index([username])
+}
+
+model PlayerStats {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  totalMatches   Int      @default(0)
+  totalKills     Int      @default(0)
+  totalDeaths    Int      @default(0)
+  totalScore     BigInt   @default(0)
+  highestMass    Int      @default(0)
+  longestSurvivalSec Int  @default(0)
+  wins           Int      @default(0)
+  level          Int      @default(1)
+  xp             Int      @default(0)
+  updatedAt      DateTime @updatedAt
+}
+
+model Room {
+  id           String    @id @default(uuid())
+  code         String?   @unique // short join code for private rooms, null for public
+  name         String
+  isPrivate    Boolean   @default(false)
+  maxPlayers   Int       @default(40)
+  mapName      String    @default("arena")
+  status       RoomStatus @default(WAITING)
+  ownerId      String?
+  owner        User?     @relation("RoomOwner", fields: [ownerId], references: [id])
+  createdAt    DateTime  @default(now())
+  closedAt     DateTime?
+
+  matches      Match[]
+
+  @@index([code])
+  @@index([status])
+}
+
+enum RoomStatus {
+  WAITING
+  IN_PROGRESS
+  CLOSED
+}
+
+model Match {
+  id          String   @id @default(uuid())
+  roomId      String
+  room        Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  mapName     String
+  startedAt   DateTime @default(now())
+  endedAt     DateTime?
+  durationSec Int?
+
+  players     MatchPlayer[]
+
+  @@index([roomId])
+}
+
+model MatchPlayer {
+  id         String   @id @default(uuid())
+  matchId    String
+  match      Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  guestName  String?
+  kills      Int      @default(0)
+  deaths     Int      @default(0)
+  finalScore Int      @default(0)
+  finalMass  Int      @default(0)
+  placement  Int?
+  joinedAt   DateTime @default(now())
+  leftAt     DateTime?
+
+  @@index([matchId])
+  @@index([userId])
+}
