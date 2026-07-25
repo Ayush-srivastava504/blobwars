@@ -1,4 +1,4 @@
-import Phaser from "phaser";
+import * as Phaser from "phaser";
 import type { Room } from "colyseus.js";
 import { ArenaScene, GameUICallbacks } from "./scenes/ArenaScene";
 
