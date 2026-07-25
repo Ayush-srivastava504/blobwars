@@ -1,0 +1,75 @@
+version: "3.9"
+
+# Backend-only stack for a 1GB RAM EC2 instance.
+#
+# Deliberately excludes:
+#   - redis        -> only needed for multi-instance horizontal scaling
+#                      (backend/src/index.ts already falls back to single-process
+#                      mode when REDIS_URL is unset — nothing to change there)
+#   - frontend      -> deploy the Next.js app elsewhere (Vercel/Amplify/etc.),
+#                      it's not worth the RAM on this box
+#   - nginx (docker) -> if you need TLS/wss, terminate it with nginx running
+#                      natively on the host (see deploy/ec2/README.md) instead
+#                      of paying for another container's memory overhead
+#
+# Memory budget on a 1024MB host:
+#   postgres  <= 300MB
+#   backend   <= 450MB
+#   remainder -> OS, docker daemon, sshd, buffer
+# This is tight without swap — deploy/ec2/setup.sh provisions a 2GB swapfile
+# before anything else runs, so a build/GC spike gets paged instead of OOM-killed.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    mem_limit: 300m
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-blobwars}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-blobwars}
+      POSTGRES_DB: ${POSTGRES_DB:-blobwars}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./deploy/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    # Bound to localhost only — the backend reaches it over the docker network by
+    # service name, this is just so you can SSH-tunnel in with psql if you need to.
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-blobwars}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    mem_limit: 450m
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 2567
+      # No REDIS_URL -> Colyseus runs in single-process presence/driver mode, correct for one instance
+      DATABASE_URL: postgresql://${POSTGRES_USER:-blobwars}:${POSTGRES_PASSWORD:-blobwars}@postgres:5432/${POSTGRES_DB:-blobwars}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      CORS_ORIGIN: ${CORS_ORIGIN:?set CORS_ORIGIN to your frontend's origin in .env}
+      # Cap V8's heap so a leak/spike degrades via more frequent GC instead of
+      # the OS OOM-killer picking a process (which could be postgres).
+      NODE_OPTIONS: --max-old-space-size=300
+    ports:
+      - "2567:2567"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:2567/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  pg_data:
