@@ -20,7 +20,15 @@ export function KillFeed({ messages }: { messages: { id: number; text: string }[
   );
 }
 
-export function DeathOverlay({ byName, onRespawn }: { byName: string; onRespawn: () => void }) {
+export function DeathOverlay({
+  byName,
+  onRespawn,
+  onExit,
+}: {
+  byName: string;
+  onRespawn: () => void;
+  onExit: () => void;
+}) {
   return (
     <div className="absolute inset-0 bg-black/70 flex flex-col items-center justify-center gap-4 animate-fadeIn">
       <h2 className="text-3xl font-bold text-arena-danger animate-zoomIn">
@@ -32,6 +40,9 @@ export function DeathOverlay({ byName, onRespawn }: { byName: string; onRespawn:
         className="mt-4 px-6 py-3 rounded-lg bg-arena-accent hover:bg-blue-500 transition-colors font-semibold"
       >
         Respawn
+      </button>
+      <button onClick={onExit} className="text-sm text-white/50 hover:text-white/80 transition-colors">
+        Exit to Lobby
       </button>
     </div>
   );

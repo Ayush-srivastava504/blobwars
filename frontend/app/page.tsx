@@ -127,7 +127,7 @@ export default function LobbyPage() {
   }
 
   if (room) {
-    return <GameCanvas room={room} />;
+    return <GameCanvas room={room} onExit={() => setRoom(null)} />;
   }
 
   return (

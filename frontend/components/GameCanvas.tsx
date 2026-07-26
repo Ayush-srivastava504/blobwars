@@ -15,7 +15,7 @@ import { KillFeed, DeathOverlay } from "./KillFeedAndDeath";
 import { Joystick } from "./Joystick";
 import { setSfxMuted } from "../lib/sfx";
 
-export function GameCanvas({ room }: { room: Room }) {
+export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef<Phaser.Game | null>(null);
   const sceneRef = useRef<any>(null);
@@ -98,6 +98,11 @@ export function GameCanvas({ room }: { room: Room }) {
     });
   }
 
+  function handleExit() {
+    room.leave();
+    onExit();
+  }
+
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-arena-bg">
       <div ref={containerRef} className="absolute inset-0" />
@@ -118,6 +123,13 @@ export function GameCanvas({ room }: { room: Room }) {
       <Joystick onChange={handleJoystickChange} />
 
       <button
+        onClick={handleExit}
+        className="absolute top-16 left-4 px-3 py-1.5 rounded-lg bg-arena-panel/80 backdrop-blur border border-white/10 text-xs font-semibold text-white/80 hover:text-white hover:bg-arena-danger/70 transition-colors"
+      >
+        ← Exit to Lobby
+      </button>
+
+      <button
         onClick={toggleMute}
         className="absolute top-4 left-1/2 -translate-x-1/2 w-9 h-9 rounded-lg bg-arena-panel/80 backdrop-blur border border-white/10 flex items-center justify-center text-white/80 hover:text-white transition-colors"
         aria-label={muted ? "Unmute sound" : "Mute sound"}
@@ -131,6 +143,7 @@ export function GameCanvas({ room }: { room: Room }) {
           onRespawn={() => {
             sceneRef.current?.requestRespawn();
           }}
+          onExit={handleExit}
         />
       )}
     </div>
