@@ -12,10 +12,28 @@ import { router } from "./http/routes";
 import { ROOM } from "@blobwars/shared";
 
 const PORT = Number(process.env.PORT || 2567);
-const REDIS_URL = process.env.REDIS_URL; // e.g. redis://redis:6379
+const REDIS_URL = process.env.REDIS_URL;
+
+const allowedOrigins = [
+  "https://blobwars.site",
+  "https://www.blobwars.site",
+];
 
 const app = express();
-app.use(cors({ origin: process.env.CORS_ORIGIN || "*" }));
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`Origin ${origin} not allowed by CORS`));
+      }
+    },
+    credentials: true,
+  })
+);
+
 app.use(express.json());
 app.use("/", router);
 
@@ -23,8 +41,6 @@ const server = http.createServer(app);
 
 const gameServer = new Server({
   transport: new WebSocketTransport({ server }),
-  // Redis presence + driver let this process horizontally scale: multiple game-server
-  // instances share room discovery / pub-sub through Redis instead of process memory.
   presence: REDIS_URL ? new RedisPresence(REDIS_URL) : undefined,
   driver: REDIS_URL ? new RedisDriver(REDIS_URL) : undefined,
 });
@@ -37,5 +53,10 @@ if (process.env.NODE_ENV !== "production") {
 
 gameServer.listen(PORT).then(() => {
   console.log(`[blobwars] game+matchmaking server listening on :${PORT}`);
-  console.log(`[blobwars] redis presence: ${REDIS_URL ? "enabled" : "disabled (single-process mode)"}`);
+  console.log(
+    `[blobwars] redis presence: ${
+      REDIS_URL ? "enabled" : "disabled (single-process mode)"
+    }`
+  );
+  console.log(`[blobwars] Allowed CORS origins: ${allowedOrigins.join(", ")}`);
 });
