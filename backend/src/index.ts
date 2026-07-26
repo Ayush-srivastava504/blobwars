@@ -2,6 +2,7 @@ import "dotenv/config";
 import http from "http";
 import express from "express";
 import cors from "cors";
+import { Encoder } from "@colyseus/schema";
 import { Server } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import { monitor } from "@colyseus/monitor";
@@ -10,6 +11,8 @@ import { RedisDriver } from "@colyseus/redis-driver";
 import { ArenaRoom } from "./rooms/ArenaRoom";
 import { router } from "./http/routes";
 import { ROOM } from "@blobwars/shared";
+
+Encoder.BUFFER_SIZE = 64 * 1024;
 
 const PORT = Number(process.env.PORT || 2567);
 const REDIS_URL = process.env.REDIS_URL;
