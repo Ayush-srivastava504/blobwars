@@ -1,3 +1,7 @@
+// REST routes: guest/Google auth, profile lookup, and room listing.
+// Wraps Colyseus matchMaker for public room discovery and private
+// room creation/lookup by join code. DB failures degrade gracefully
+// so guests can still play without persistence.
 import { Router } from "express";
 import { nanoid } from "nanoid";
 import { matchMaker } from "@colyseus/core";
@@ -8,7 +12,6 @@ import { ROOM } from "@blobwars/shared";
 
 export const router = Router();
 
-/** POST /auth/guest { username } -> creates/reuses a guest user and returns a session token */
 router.post("/auth/guest", async (req, res) => {
   const requested = String(req.body?.username || "").trim().slice(0, 16);
   const username = requested || `Guest${Math.floor(Math.random() * 99999)}`;
@@ -22,14 +25,12 @@ router.post("/auth/guest", async (req, res) => {
     const token = signSessionToken({ userId: user.id, username: user.username, isGuest: true });
     res.json({ token, user: { id: user.id, username: user.username, isGuest: true } });
   } catch (err) {
-    // DB not reachable in dev fallback: still let people play, just without persistence.
     const fallbackId = nanoid(10);
     const token = signSessionToken({ userId: fallbackId, username, isGuest: true });
     res.json({ token, user: { id: fallbackId, username, isGuest: true }, warning: "db_unavailable" });
   }
 });
 
-/** POST /auth/google { idToken } -> verifies with Google, upserts user, returns session token */
 router.post("/auth/google", async (req, res) => {
   const idToken = req.body?.idToken;
   if (!idToken) return res.status(400).json({ error: "idToken required" });
@@ -59,7 +60,6 @@ router.post("/auth/google", async (req, res) => {
   }
 });
 
-/** GET /profile/me — requires Authorization: Bearer <token> */
 router.get("/profile/me", async (req, res) => {
   const token = (req.headers.authorization || "").replace("Bearer ", "");
   const payload = verifySessionToken(token);
@@ -76,7 +76,6 @@ router.get("/profile/me", async (req, res) => {
   }
 });
 
-/** GET /rooms — public server list for the lobby */
 router.get("/rooms", async (_req, res) => {
   try {
     const rooms = await matchMaker.query({ name: ROOM.NAME, private: false });
@@ -94,7 +93,6 @@ router.get("/rooms", async (_req, res) => {
   }
 });
 
-/** POST /rooms/private { name } -> creates a private room and returns its join code */
 router.post("/rooms/private", async (req, res) => {
   const name = String(req.body?.name || "Private Room").slice(0, 24);
   const code = nanoid(6).toUpperCase();
@@ -107,7 +105,6 @@ router.post("/rooms/private", async (req, res) => {
   }
 });
 
-/** GET /rooms/code/:code -> resolves a join code to a roomId for the client to connect to */
 router.get("/rooms/code/:code", async (req, res) => {
   try {
     const rooms = await matchMaker.query({ name: ROOM.NAME });

@@ -1,7 +1,10 @@
+// Persists match results to the database via Prisma: creates a Match
+// row per room and records each player's per-match stats on leave.
+// Also rolls per-user lifetime totals into PlayerStats when the
+// player is a registered (non-guest) user.
 import { prisma } from "./prisma";
 
 export async function createMatchForRoom(roomId: string, mapName: string): Promise<string> {
-  // Room row is optional in dev (foreign key), so we upsert a lightweight "public" room record.
   const room = await prisma.room.upsert({
     where: { id: roomId },
     update: {},
@@ -52,7 +55,7 @@ export async function recordMatchPlayerResult(
         totalKills: { increment: data.kills },
         totalDeaths: { increment: data.deaths },
         totalScore: { increment: data.finalScore },
-        highestMass: { set: data.finalMass }, // simplified; app layer should max() against existing
+        highestMass: { set: data.finalMass },
       },
       create: {
         userId: data.userId,

@@ -1,3 +1,7 @@
+// Bottom-center HUD: health bar, XP bar, level, mass, and score.
+// Computes percentage fills from raw values passed down by GameCanvas.
+// Purely presentational, no internal state.
+// Bar widths are clamped to 0-100% to guard against bad input data.
 "use client";
 
 export function StatusBars({

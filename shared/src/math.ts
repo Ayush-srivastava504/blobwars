@@ -1,3 +1,8 @@
+// Shared, pure math helpers for BlobWars movement and combat.
+// Used identically on the server (authoritative simulation) and
+// client (prediction) so both stay numerically in sync.
+// No side effects; every function here is deterministic.
+
 import { PLAYER, SIM, WORLD } from "./constants";
 
 export function clamp(v: number, min: number, max: number): number {
@@ -28,10 +33,6 @@ export function circlesOverlap(
   return distance(ax, ay, bx, by) < ar + br;
 }
 
-/**
- * Applies one authoritative movement step. Pure function so it can be run
- * identically on server (authoritative) and client (prediction/reconciliation).
- */
 export function stepPosition(
   x: number,
   y: number,

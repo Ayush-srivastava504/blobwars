@@ -1,3 +1,7 @@
+// Session/auth client: guest and Google login, token/user persistence
+// in localStorage, and public/private room listing over HTTP.
+// Talks to the backend's REST routes, not the Colyseus websocket.
+// Consumed by the lobby page before a game room is joined.
 "use client";
 
 const HTTP_BASE = process.env.NEXT_PUBLIC_GAME_SERVER_HTTP!;

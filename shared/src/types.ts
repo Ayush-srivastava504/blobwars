@@ -1,14 +1,18 @@
+// Shared TypeScript types and message contracts for BlobWars.
+// Defines player/food/obstacle snapshots sent over the network,
+// plus the Colyseus message-type identifiers both sides send.
+// Kept dependency-free so it can be imported anywhere.
+
 export interface Vector2 {
   x: number;
   y: number;
 }
 
-/** Client -> Server input message, sent every input frame (not every render frame). */
 export interface InputMessage {
-  seq: number; // monotonically increasing, used for client reconciliation
-  dirX: number; // normalized direction -1..1
-  dirY: number; // normalized direction -1..1
-  boost: boolean; // split/boost action
+  seq: number;
+  dirX: number;
+  dirY: number;
+  boost: boolean;
   timestamp: number;
 }
 
@@ -61,7 +65,6 @@ export interface RoomMetadata {
   isPrivate: boolean;
 }
 
-// Colyseus room message type identifiers (kept as string literal union for safety)
 export const MSG = {
   INPUT: "input",
   RESPAWN: "respawn",

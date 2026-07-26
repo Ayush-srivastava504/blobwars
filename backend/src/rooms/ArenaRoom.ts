@@ -1,3 +1,7 @@
+// Authoritative Colyseus room for one arena match: owns the fixed-rate
+// simulation loop, movement, obstacle collision, food pickup, and
+// player-vs-player combat/kill handling. Broadcasts state to clients
+// at a lower patch rate and records match results to the database.
 import { Room, Client } from "@colyseus/core";
 import { nanoid } from "nanoid";
 import { ArenaState, PlayerSchema, FoodSchema, ObstacleSchema } from "./schema/ArenaState";
@@ -27,7 +31,6 @@ export class ArenaRoom extends Room<ArenaState> {
 
   private inputQueues = new Map<string, PendingInput[]>();
   private lastDir = new Map<string, { x: number; y: number }>();
-  private simInterval!: NodeJS.Timeout;
   private matchId: string | null = null;
   private colorCursor = 0;
 
@@ -44,8 +47,7 @@ export class ArenaRoom extends Room<ArenaState> {
     this.onMessage(MSG.INPUT, (client, message: InputMessage) => {
       const queue = this.inputQueues.get(client.sessionId);
       if (queue) {
-        // cap queue to avoid unbounded growth from a laggy/malicious client
-        if (queue.length < 12) queue.push(message);
+          if (queue.length < 12) queue.push(message);
       }
     });
 
@@ -57,17 +59,15 @@ export class ArenaRoom extends Room<ArenaState> {
       client.send(MSG.PONG, ts);
     });
 
-    // Fixed-rate authoritative simulation loop, decoupled from client render/broadcast rate.
     const dt = 1000 / SIM.TICK_RATE;
     this.setSimulationInterval(() => this.tick(dt / 1000), dt);
 
-    // Broadcast at a lower rate than simulation to save bandwidth (delta-compressed by Colyseus anyway).
     this.setPatchRate(1000 / SIM.PATCH_RATE);
 
     try {
       this.matchId = await this.createMatchRecord();
     } catch {
-      this.matchId = null; // DB optional in dev; game still runs
+      this.matchId = null;
     }
   }
 
@@ -136,12 +136,10 @@ export class ArenaRoom extends Room<ArenaState> {
     const player = this.state.players.get(client.sessionId);
     try {
       if (!consented) {
-        // allow reconnection window for dropped connections
         await this.allowReconnection(client, 20);
         return;
       }
     } catch {
-      // reconnection window expired — fall through to cleanup
     }
 
     if (player && this.matchId) {
@@ -161,7 +159,6 @@ export class ArenaRoom extends Room<ArenaState> {
   }
 
   onDispose() {
-    // room closed — nothing extra to clean up (in-memory state is GC'd)
   }
 
   private respawnPlayer(sessionId: string) {
@@ -174,7 +171,6 @@ export class ArenaRoom extends Room<ArenaState> {
     player.spawnProtectedUntil = Date.now() + PLAYER.INVULNERABLE_MS_AFTER_SPAWN;
   }
 
-  /** Core authoritative simulation step, run at SIM.TICK_RATE regardless of network conditions. */
   private tick(dtSeconds: number) {
     this.state.serverTime = Date.now();
 
@@ -185,7 +181,6 @@ export class ArenaRoom extends Room<ArenaState> {
       let dir = this.lastDir.get(sessionId) ?? { x: 0, y: 0 };
 
       if (queue && queue.length > 0) {
-        // Process all buffered inputs this tick (handles variable client send rates).
         for (const input of queue) {
           dir = { x: input.dirX, y: input.dirY };
           player.lastProcessedInputSeq = input.seq;
@@ -196,7 +191,6 @@ export class ArenaRoom extends Room<ArenaState> {
 
       const next = stepPosition(player.x, player.y, dir.x, dir.y, player.mass, dtSeconds);
 
-      // Obstacle collision: simple circle-vs-circle push-out
       const radius = massToRadius(player.mass);
       let resolvedX = next.x;
       let resolvedY = next.y;
@@ -256,7 +250,6 @@ export class ArenaRoom extends Room<ArenaState> {
         const rb = massToRadius(b.mass);
         if (!circlesOverlap(a.x, a.y, ra, b.x, b.y, rb)) continue;
 
-        // larger mass deals damage to smaller mass proportional to the mass difference
         const [big, small, bigId, smallId] = a.mass >= b.mass ? [a, b, idA, idB] : [b, a, idB, idA];
         const massDiff = big.mass - small.mass;
         if (massDiff <= 0) continue;
@@ -292,14 +285,11 @@ export class ArenaRoom extends Room<ArenaState> {
       killer: killer?.name ?? "the arena",
     });
 
-    // notify the victim's own client directly so it can show a death screen immediately
     const client = this.clients.find((c) => c.sessionId === victimId);
     client?.send(MSG.KILLED, { by: killer?.name ?? "the arena" });
 
     this.clock.setTimeout(() => {
-      // player may have left already
       if (this.state.players.has(victimId)) {
-        // stays "dead" until client requests respawn, or auto-respawn after delay
         this.respawnPlayer(victimId);
       }
     }, PLAYER.RESPAWN_DELAY_MS);

@@ -1,8 +1,7 @@
-/**
- * Single source of truth for tunable game parameters.
- * Imported by BOTH the Colyseus server and the Phaser client so that
- * client-side prediction stays numerically identical to server simulation.
- */
+// Shared, tunable game-balance constants for BlobWars.
+// Imported by both the Colyseus server and the Phaser client so
+// simulation math stays identical on both sides.
+// Values here are the single source of truth for gameplay tuning.
 
 export const WORLD = {
   WIDTH: 4000,
@@ -11,10 +10,10 @@ export const WORLD = {
 } as const;
 
 export const SIM = {
-  TICK_RATE: 30, // authoritative simulation steps per second
-  PATCH_RATE: 20, // state broadcast rate per second
-  BASE_SPEED: 220, // px/s at minimum mass
-  SPEED_MASS_FALLOFF: 0.0025, // larger blobs move slower
+  TICK_RATE: 30,
+  PATCH_RATE: 20,
+  BASE_SPEED: 220,
+  SPEED_MASS_FALLOFF: 0.0025,
   MIN_SPEED: 60,
 } as const;
 
@@ -24,10 +23,10 @@ export const PLAYER = {
   MAX_MASS: 4000,
   START_HEALTH: 100,
   MAX_HEALTH: 100,
-  RADIUS_MASS_FACTOR: 4.2, // radius = BASE_RADIUS + sqrt(mass) * factor
+  RADIUS_MASS_FACTOR: 4.2,
   BASE_RADIUS: 12,
   RESPAWN_DELAY_MS: 2500,
-  DAMAGE_PER_MASS_DIFF: 0.12, // combat damage scaling when larger eats smaller via contact
+  DAMAGE_PER_MASS_DIFF: 0.12,
   INVULNERABLE_MS_AFTER_SPAWN: 1500,
 } as const;
 

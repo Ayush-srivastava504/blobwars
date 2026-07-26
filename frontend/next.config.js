@@ -1,3 +1,7 @@
+// Next.js build config: standalone output for Docker, transpiles the
+// shared workspace package and Phaser, and forwards public env vars
+// (game server WS/HTTP URLs, Google client id) to the client bundle.
+// No custom webpack or routing overrides.
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,

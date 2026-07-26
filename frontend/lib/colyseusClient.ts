@@ -1,3 +1,7 @@
+// Thin wrapper around the Colyseus client: creates a singleton client,
+// and exposes helpers to join the public arena, join a room by id,
+// or reconnect after a dropped connection using a reconnection token.
+// Used by the lobby page to obtain a Room before entering gameplay.
 import { Client, Room } from "colyseus.js";
 import { ROOM } from "@blobwars/shared";
 

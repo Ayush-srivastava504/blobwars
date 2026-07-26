@@ -1,3 +1,7 @@
+// Top-left HUD badge showing live FPS and network ping.
+// Colors shift green/yellow/red based on simple health thresholds.
+// Pure presentational component, values passed down from GameCanvas.
+// No internal state or side effects.
 "use client";
 
 export function PerfIndicators({ ping, fps }: { ping: number; fps: number }) {

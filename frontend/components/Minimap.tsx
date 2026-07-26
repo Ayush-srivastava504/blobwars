@@ -1,3 +1,7 @@
+// Bottom-right minimap: draws the player and nearby others as dots
+// on a small canvas, scaled from world coordinates to minimap pixels.
+// Pure rendering component driven by MinimapData passed from GameCanvas.
+// Redraws on every data update via a canvas 2D context.
 "use client";
 
 import { useEffect, useRef } from "react";

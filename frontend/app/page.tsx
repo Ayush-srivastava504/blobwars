@@ -1,3 +1,7 @@
+// Lobby page: guest/Google login, public server list, private rooms.
+// Once a Colyseus Room is joined it swaps to rendering GameCanvas.
+// Polls public rooms every 5s while logged in and idle in the lobby.
+// All networking goes through lib/session.ts and lib/colyseusClient.ts.
 "use client";
 
 import { useEffect, useState } from "react";

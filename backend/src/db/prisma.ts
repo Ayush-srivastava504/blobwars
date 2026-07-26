@@ -1,6 +1,9 @@
+// Shared Prisma client singleton, cached on globalThis in dev so hot
+// reloads don't exhaust database connections. Production always gets
+// a fresh instance per process start.
+// Imported by routes and the match repository for all DB access.
 import { PrismaClient } from "@prisma/client";
 
-// Reuse a single instance across hot reloads in dev.
 declare global {
   // eslint-disable-next-line no-var
   var __prisma: PrismaClient | undefined;

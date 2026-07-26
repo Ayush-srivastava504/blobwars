@@ -1,3 +1,7 @@
+// Factory that boots a Phaser game instance for the arena.
+// Configures renderer, canvas sizing, and physics, then starts
+// ArenaScene with the Colyseus room and React UI callbacks.
+// Called once by GameCanvas when the lobby hands off to gameplay.
 import * as Phaser from "phaser";
 import type { Room } from "colyseus.js";
 import { ArenaScene, GameUICallbacks } from "./scenes/ArenaScene";

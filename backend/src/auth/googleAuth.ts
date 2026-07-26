@@ -1,3 +1,7 @@
+// Verifies Google Identity Services ID tokens sent from the frontend.
+// Never trusts a client-asserted identity; validates the token's
+// signature and audience against Google servers before extracting profile.
+// Used by the /auth/google HTTP route.
 import { OAuth2Client } from "google-auth-library";
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -9,11 +13,6 @@ export interface GoogleProfile {
   avatarUrl?: string;
 }
 
-/**
- * Verifies a Google ID token sent from the Next.js frontend (Google Identity Services
- * "One Tap" / button flow posts an id_token which we validate server-side — never trust
- * a client-asserted identity).
- */
 export async function verifyGoogleIdToken(idToken: string): Promise<GoogleProfile | null> {
   if (!process.env.GOOGLE_CLIENT_ID) {
     throw new Error("GOOGLE_CLIENT_ID not configured on backend");

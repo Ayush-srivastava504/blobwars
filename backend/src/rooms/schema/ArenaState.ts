@@ -1,3 +1,7 @@
+// Colyseus schema definitions for the arena's synced state.
+// Players, food, and obstacles are all replicated to every client;
+// ArenaState is the root schema attached to the ArenaRoom.
+// Decorated fields here are the network-serialized wire format.
 import { Schema, MapSchema, type } from "@colyseus/schema";
 
 export class PlayerSchema extends Schema {
@@ -17,8 +21,6 @@ export class PlayerSchema extends Schema {
   @type("number") score: number = 0;
   @type("number") lastProcessedInputSeq: number = 0;
   @type("number") spawnProtectedUntil: number = 0;
-
-  // server-only (not synced): pending input queue handled outside schema
 }
 
 export class FoodSchema extends Schema {

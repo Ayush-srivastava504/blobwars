@@ -1,3 +1,7 @@
+// Backend entrypoint: boots Express (CORS + REST routes) and the
+// Colyseus game server on one HTTP server, registering ArenaRoom.
+// Uses Redis presence/driver when REDIS_URL is set for multi-process
+// scaling, otherwise runs single-process. Exposes /colyseus monitor in dev.
 import "dotenv/config";
 import http from "http";
 import express from "express";

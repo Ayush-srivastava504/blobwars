@@ -1,3 +1,7 @@
+// Signs and verifies session JWTs used for guest and Google logins.
+// Tokens carry userId, username, and isGuest, and expire after 30 days.
+// Falls back to a dev secret if JWT_SECRET is unset (set it in prod).
+// Used by the /auth routes and any route that checks a bearer token.
 import jwt from "jsonwebtoken";
 
 const SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
