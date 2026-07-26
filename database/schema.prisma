@@ -3,6 +3,7 @@
 
 generator client {
   provider = "prisma-client-js"
+  output   = "../backend/node_modules/.prisma/client"
 }
 
 datasource db {
@@ -36,36 +37,36 @@ model User {
 }
 
 model PlayerStats {
-  id                 String   @id @default(uuid())
-  userId             String   @unique
-  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  totalMatches       Int      @default(0)
-  totalKills         Int      @default(0)
-  totalDeaths        Int      @default(0)
-  totalScore         BigInt   @default(0)
-  highestMass        Int      @default(0)
-  longestSurvivalSec Int      @default(0)
-  wins               Int      @default(0)
-  level              Int      @default(1)
-  xp                 Int      @default(0)
-  updatedAt          DateTime @updatedAt
+  totalMatches   Int      @default(0)
+  totalKills     Int      @default(0)
+  totalDeaths    Int      @default(0)
+  totalScore     BigInt   @default(0)
+  highestMass    Int      @default(0)
+  longestSurvivalSec Int  @default(0)
+  wins           Int      @default(0)
+  level          Int      @default(1)
+  xp             Int      @default(0)
+  updatedAt      DateTime @updatedAt
 }
 
 model Room {
-  id         String     @id @default(uuid())
-  code       String?    @unique
-  name       String
-  isPrivate  Boolean    @default(false)
-  maxPlayers Int        @default(40)
-  mapName    String     @default("arena")
-  status     RoomStatus @default(WAITING)
-  ownerId    String?
-  owner      User?      @relation("RoomOwner", fields: [ownerId], references: [id])
-  createdAt  DateTime   @default(now())
-  closedAt   DateTime?
+  id           String    @id @default(uuid())
+  code         String?   @unique // short join code for private rooms, null for public
+  name         String
+  isPrivate    Boolean   @default(false)
+  maxPlayers   Int       @default(40)
+  mapName      String    @default("arena")
+  status       RoomStatus @default(WAITING)
+  ownerId      String?
+  owner        User?     @relation("RoomOwner", fields: [ownerId], references: [id])
+  createdAt    DateTime  @default(now())
+  closedAt     DateTime?
 
-  matches    Match[]
+  matches      Match[]
 
   @@index([code])
   @@index([status])

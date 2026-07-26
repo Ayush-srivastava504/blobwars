@@ -13,21 +13,13 @@ usage.
 - **No redis** — `backend/src/index.ts` already runs Colyseus in single-process
   presence/driver mode when `REDIS_URL` is unset. Redis is only for horizontal
   scaling across multiple instances, which doesn't apply here.
-- **No frontend** — the Next.js app is deployed separately on Vercel at
-  `blobwars.site` / `www.blobwars.site`. Its `NEXT_PUBLIC_GAME_SERVER_*` env
-  vars (see `frontend/.env.production`) point at this instance's domain.
-- **No nginx container** — since the frontend is served over `https://`, the
-  browser requires `wss://` (not plain `ws://`) to talk to this backend, so
-  TLS is not optional here. Run nginx natively on the host instead of in
-  Docker; see `deploy/ec2/nginx-wss.conf.example`, which is preconfigured for
-  `api.blobwars.site`.
-
-### DNS + security group
-
-- Point an **A record** for `api.blobwars.site` at this instance's public IP.
-- Security group inbound: **22** (SSH, restrict to your IP), **80** and
-  **443** (for nginx + certbot). You can close 2567 to the internet once
-  nginx is fronting it — nginx reaches the backend over `127.0.0.1:2567`.
+- **No frontend** — deploy the Next.js app separately (Vercel, Amplify, another
+  small instance, whatever). Point its `NEXT_PUBLIC_GAME_SERVER_*` env vars at
+  this instance's IP/domain.
+- **No nginx container** — if you need TLS (`wss://` for an https:// frontend),
+  run nginx natively on the host instead of in Docker; see
+  `deploy/ec2/nginx-wss.conf.example`. Skip it entirely if you're fine with
+  plain `ws://` for now.
 
 ## Instance
 
@@ -47,19 +39,12 @@ usage.
 3. `chmod +x deploy/ec2/setup.sh && ./deploy/ec2/setup.sh`
    - First run: provisions a 2GB swapfile, installs Docker, then stops and
      asks you to fill in `.env` (copied from `.env.ec2.example`) — set
-     `JWT_SECRET`, `POSTGRES_PASSWORD`, and confirm `CORS_ORIGIN` is
-     `https://blobwars.site,https://www.blobwars.site` (already the default
-     in `.env.ec2.example`).
+     `JWT_SECRET`, `POSTGRES_PASSWORD`, and `CORS_ORIGIN` (your frontend's
+     exact origin).
    - Run it again: builds the backend image, brings up postgres, runs
      `prisma migrate deploy`, then starts the backend.
 4. `curl http://localhost:2567/health` should return `{"status":"ok",...}`.
-5. Set up `deploy/ec2/nginx-wss.conf.example` + certbot for `api.blobwars.site`
-   (see "DNS + security group" above) — this is **required**, not optional,
-   since the frontend needs `wss://`.
-6. On Vercel, deploy `frontend/` with the domain `blobwars.site` /
-   `www.blobwars.site` attached. `frontend/.env.production` already points
-   `NEXT_PUBLIC_GAME_SERVER_WS`/`_HTTP` at `api.blobwars.site` — override in
-   the Vercel dashboard instead if you'd rather not commit them.
+5. (Optional) set up `deploy/ec2/nginx-wss.conf.example` + certbot if you need `wss://`.
 
 ## Operating it
 

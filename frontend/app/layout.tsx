@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://blobwars.site"),
   title: "Blob Wars — Multiplayer Arena",
   description: "Real-time multiplayer .io arena game",
 };

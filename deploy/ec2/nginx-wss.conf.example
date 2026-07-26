@@ -1,21 +1,13 @@
-# Serves wss://api.blobwars.site -> the backend container on 127.0.0.1:2567.
-#
-# Your frontend is served over https:// (blobwars.site on Vercel), so it MUST
-# reach the backend over wss:// / https:// too — browsers block ws:// (and any
-# http:// XHR/fetch) calls from an https:// page as "mixed content". This file
-# is what makes that work.
+# OPTIONAL — only needed if your frontend is served over https:// and therefore
+# needs wss:// (browsers block ws:// from an https page — mixed content).
 #
 # Runs natively on the host (not in Docker) to avoid paying for another
-# container's memory on a 1GB box.
+# container's memory on a 1GB box. Install with: sudo dnf install -y nginx
+# then copy this file to /etc/nginx/conf.d/blobwars.conf and get a cert with
+# certbot (sudo dnf install -y certbot python3-certbot-nginx && sudo certbot --nginx).
 #
-# Setup:
-#   1. sudo dnf install -y nginx certbot python3-certbot-nginx
-#   2. Point api.blobwars.site's DNS A record at this instance's IP.
-#   3. Copy this file to /etc/nginx/conf.d/blobwars.conf
-#   4. sudo nginx -t && sudo systemctl enable --now nginx
-#   5. sudo certbot --nginx -d api.blobwars.site
-#      certbot will rewrite the "listen 443" block below with the correct
-#      cert paths automatically — you don't need to fill those in by hand.
+# Until you set up TLS, the backend is reachable directly at ws://<ec2-ip>:2567
+# — fine for an http:// frontend or local testing, not for a production https:// site.
 
 map $http_upgrade $connection_upgrade {
   default upgrade;
@@ -24,12 +16,8 @@ map $http_upgrade $connection_upgrade {
 
 server {
   listen 80;
-  listen [::]:80;
-  server_name api.blobwars.site;
+  server_name your-backend-domain.example;
 
-  # certbot will insert its ACME-challenge location + a redirect to 443 here
-  # automatically the first time you run `certbot --nginx`. Until then this
-  # just serves plain http:// (fine for the initial cert issuance step).
   location / {
     proxy_pass http://127.0.0.1:2567;
     proxy_http_version 1.1;
@@ -37,14 +25,6 @@ server {
     proxy_set_header Connection $connection_upgrade;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
     proxy_read_timeout 3600s;   # long-lived websocket connections
   }
 }
-
-# After running certbot, you'll have a second server block here listening on
-# 443 with ssl_certificate / ssl_certificate_key pointing at
-# /etc/letsencrypt/live/api.blobwars.site/. Keep the same proxy_set_header
-# lines (especially Upgrade/Connection) in that block — certbot only adds the
-# ssl_certificate lines, it doesn't remove or break the proxy config above.
