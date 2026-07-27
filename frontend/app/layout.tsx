@@ -5,7 +5,6 @@
 import type { Metadata } from "next";
 import Script from "next/script";
 import "./globals.css";
-import ChunkErrorHandler from "./chunk-error-handler";
 
 export const metadata: Metadata = {
   title: "Blob Wars — Multiplayer Arena",
@@ -31,10 +30,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           `}
         </Script>
       </head>
-      <body className="font-game text-white bg-arena-bg">
-        <ChunkErrorHandler />
-        {children}
-      </body>
+      <body className="font-game text-white bg-arena-bg">{children}</body>
     </html>
   );
 }
