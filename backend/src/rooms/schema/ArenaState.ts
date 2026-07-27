@@ -19,8 +19,20 @@ export class PlayerSchema extends Schema {
   @type("number") kills: number = 0;
   @type("number") deaths: number = 0;
   @type("number") score: number = 0;
+  @type("number") coins: number = 0;
   @type("number") lastProcessedInputSeq: number = 0;
   @type("number") spawnProtectedUntil: number = 0;
+}
+
+export class ZombieSchema extends Schema {
+  @type("string") id: string = "";
+  @type("number") x: number = 0;
+  @type("number") y: number = 0;
+  @type("number") health: number = 30;
+  @type("number") maxHealth: number = 30;
+  @type("string") state: "alive" | "dead" = "alive";
+  @type("string") targetId: string = "";
+  @type("number") wave: number = 1;
 }
 
 export class FoodSchema extends Schema {
@@ -42,5 +54,9 @@ export class ArenaState extends Schema {
   @type({ map: PlayerSchema }) players = new MapSchema<PlayerSchema>();
   @type({ map: FoodSchema }) food = new MapSchema<FoodSchema>();
   @type({ map: ObstacleSchema }) obstacles = new MapSchema<ObstacleSchema>();
+  @type({ map: ZombieSchema }) zombies = new MapSchema<ZombieSchema>();
   @type("number") serverTime: number = 0;
+  @type("number") wave: number = 0;
+  @type("string") waveState: "intermission" | "active" = "intermission";
+  @type("number") waveEndsOrStartsAt: number = 0;
 }

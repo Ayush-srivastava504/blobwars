@@ -4,7 +4,7 @@
 // at a lower patch rate and records match results to the database.
 import { Room, Client } from "@colyseus/core";
 import { nanoid } from "nanoid";
-import { ArenaState, PlayerSchema, FoodSchema, ObstacleSchema } from "./schema/ArenaState";
+import { ArenaState, PlayerSchema, FoodSchema, ObstacleSchema, ZombieSchema } from "./schema/ArenaState";
 import {
   WORLD,
   SIM,
@@ -15,9 +15,12 @@ import {
   ROOM,
   XP,
   MSG,
+  ZOMBIE,
+  WAVE,
   stepPosition,
   massToRadius,
   circlesOverlap,
+  distance,
 } from "@blobwars/shared";
 import type { InputMessage } from "@blobwars/shared";
 import { recordMatchPlayerResult } from "../db/matchRepository";
@@ -43,6 +46,8 @@ export class ArenaRoom extends Room<ArenaState> {
     });
     this.seedObstacles();
     this.seedFood();
+    this.state.waveState = "intermission";
+    this.state.waveEndsOrStartsAt = Date.now() + WAVE.FIRST_WAVE_DELAY_MS;
 
     this.onMessage(MSG.INPUT, (client, message: InputMessage) => {
       const queue = this.inputQueues.get(client.sessionId);
@@ -210,7 +215,186 @@ export class ArenaRoom extends Room<ArenaState> {
     }
 
     this.handleFoodCollisions();
-    this.handlePlayerCombat();
+    this.updateWaves();
+    this.updateZombies(dtSeconds);
+    this.handleZombieCombat();
+  }
+
+  // ---- Wave spawner ----
+
+  private updateWaves() {
+    const now = Date.now();
+    const aliveZombies = this.countAliveZombies();
+
+    if (this.state.waveState === "intermission") {
+      if (now >= this.state.waveEndsOrStartsAt) {
+        this.startNextWave();
+      }
+      return;
+    }
+
+    // waveState === "active": once every zombie from this wave is dead, go to intermission.
+    if (aliveZombies === 0) {
+      this.state.waveState = "intermission";
+      this.state.waveEndsOrStartsAt = now + WAVE.INTERMISSION_MS;
+      this.broadcast(MSG.KILL_FEED, { victim: "", killer: `Wave ${this.state.wave} cleared!` });
+    }
+  }
+
+  private startNextWave() {
+    this.state.wave += 1;
+    this.state.waveState = "active";
+    const count = Math.min(
+      WAVE.BASE_COUNT + (this.state.wave - 1) * WAVE.COUNT_GROWTH_PER_WAVE,
+      WAVE.MAX_ZOMBIES_ALIVE
+    );
+    for (let i = 0; i < count; i++) {
+      this.spawnZombie(this.state.wave);
+    }
+    this.broadcast(MSG.KILL_FEED, { victim: "", killer: `Wave ${this.state.wave} incoming!` });
+  }
+
+  private countAliveZombies(): number {
+    let n = 0;
+    for (const z of this.state.zombies.values()) {
+      if (z.state === "alive") n++;
+    }
+    return n;
+  }
+
+  private spawnZombie(wave: number) {
+    const pos = this.randomFreePosition(ZOMBIE.RADIUS);
+    const z = new ZombieSchema();
+    z.id = nanoid(8);
+    z.x = pos.x;
+    z.y = pos.y;
+    z.health = ZOMBIE.BASE_HEALTH * Math.pow(ZOMBIE.HEALTH_GROWTH_PER_WAVE, wave - 1);
+    z.maxHealth = z.health;
+    z.state = "alive";
+    z.wave = wave;
+    this.state.zombies.set(z.id, z);
+    this.zombieAttackCooldown.set(z.id, 0);
+  }
+
+  // ---- Zombie AI ----
+
+  private zombieAttackCooldown = new Map<string, number>();
+
+  private updateZombies(dtSeconds: number) {
+    if (this.state.zombies.size === 0) return;
+
+    const alivePlayers = Array.from(this.state.players.values()).filter((p) => p.state === "alive");
+    const wave = this.state.wave;
+    const speed = Math.min(
+      ZOMBIE.BASE_SPEED * Math.pow(ZOMBIE.SPEED_GROWTH_PER_WAVE, wave - 1),
+      ZOMBIE.MAX_SPEED
+    );
+
+    for (const zombie of this.state.zombies.values()) {
+      if (zombie.state !== "alive") continue;
+      if (alivePlayers.length === 0) continue;
+
+      let nearest: PlayerSchema | null = null;
+      let nearestDist = Infinity;
+      for (const p of alivePlayers) {
+        const d = distance(zombie.x, zombie.y, p.x, p.y);
+        if (d < nearestDist) {
+          nearestDist = d;
+          nearest = p;
+        }
+      }
+      if (!nearest) continue;
+      zombie.targetId = nearest.id;
+
+      const dx = nearest.x - zombie.x;
+      const dy = nearest.y - zombie.y;
+      const len = Math.hypot(dx, dy) || 1;
+      let nx = zombie.x + (dx / len) * speed * dtSeconds;
+      let ny = zombie.y + (dy / len) * speed * dtSeconds;
+
+      for (const obstacle of this.state.obstacles.values()) {
+        if (circlesOverlap(nx, ny, ZOMBIE.RADIUS, obstacle.x, obstacle.y, obstacle.radius)) {
+          const odx = nx - obstacle.x;
+          const ody = ny - obstacle.y;
+          const odist = Math.hypot(odx, ody) || 1;
+          const overlap = ZOMBIE.RADIUS + obstacle.radius - odist;
+          nx += (odx / odist) * overlap;
+          ny += (ody / odist) * overlap;
+        }
+      }
+
+      zombie.x = nx;
+      zombie.y = ny;
+    }
+  }
+
+  private handleZombieCombat() {
+    const now = Date.now();
+
+    for (const [zombieId, zombie] of this.state.zombies) {
+      if (zombie.state !== "alive") continue;
+
+      for (const [playerId, player] of this.state.players) {
+        if (player.state !== "alive" || now < player.spawnProtectedUntil) continue;
+
+        const playerRadius = massToRadius(player.mass);
+        if (!circlesOverlap(zombie.x, zombie.y, ZOMBIE.RADIUS, player.x, player.y, playerRadius)) continue;
+
+        // Zombie bites player (rate-limited).
+        const cooldownUntil = this.zombieAttackCooldown.get(zombieId) ?? 0;
+        if (now >= cooldownUntil) {
+          player.health = Math.max(0, player.health - ZOMBIE.CONTACT_DAMAGE);
+          this.zombieAttackCooldown.set(zombieId, now + ZOMBIE.ATTACK_COOLDOWN_MS);
+          if (player.health <= 0) {
+            this.killPlayerByZombie(playerId);
+          }
+        }
+
+        // Player's mass grinds the zombie down on contact.
+        const damage = player.mass * ZOMBIE.DAMAGE_PER_PLAYER_MASS * (1 / SIM.TICK_RATE);
+        zombie.health = Math.max(0, zombie.health - damage);
+        if (zombie.health <= 0) {
+          this.killZombie(zombieId, playerId);
+          break;
+        }
+      }
+    }
+  }
+
+  private killZombie(zombieId: string, killerId: string) {
+    const zombie = this.state.zombies.get(zombieId);
+    const killer = this.state.players.get(killerId);
+    if (!zombie) return;
+
+    zombie.state = "dead";
+    this.state.zombies.delete(zombieId);
+    this.zombieAttackCooldown.delete(zombieId);
+
+    if (killer) {
+      killer.coins += ZOMBIE.COINS_PER_KILL;
+      killer.kills += 1;
+      killer.score += ZOMBIE.COINS_PER_KILL;
+      this.addXp(killer, XP.PER_ZOMBIE_KILL);
+    }
+  }
+
+  private killPlayerByZombie(victimId: string) {
+    const victim = this.state.players.get(victimId);
+    if (!victim) return;
+
+    victim.state = "dead";
+    victim.deaths += 1;
+
+    this.broadcast(MSG.KILL_FEED, { victim: victim.name, killer: "a zombie" });
+
+    const client = this.clients.find((c) => c.sessionId === victimId);
+    client?.send(MSG.KILLED, { by: "a zombie" });
+
+    this.clock.setTimeout(() => {
+      if (this.state.players.has(victimId)) {
+        this.respawnPlayer(victimId);
+      }
+    }, PLAYER.RESPAWN_DELAY_MS);
   }
 
   private handleFoodCollisions() {
@@ -234,65 +418,6 @@ export class ArenaRoom extends Room<ArenaState> {
     this.clock.setTimeout(() => {
       if (this.state.food.size < FOOD.COUNT) this.spawnFood();
     }, FOOD.RESPAWN_MS);
-  }
-
-  private handlePlayerCombat() {
-    const players = Array.from(this.state.players.entries()).filter(([, p]) => p.state === "alive");
-
-    for (let i = 0; i < players.length; i++) {
-      for (let j = i + 1; j < players.length; j++) {
-        const [idA, a] = players[i];
-        const [idB, b] = players[j];
-        const now = Date.now();
-        if (now < a.spawnProtectedUntil || now < b.spawnProtectedUntil) continue;
-
-        const ra = massToRadius(a.mass);
-        const rb = massToRadius(b.mass);
-        if (!circlesOverlap(a.x, a.y, ra, b.x, b.y, rb)) continue;
-
-        const [big, small, bigId, smallId] = a.mass >= b.mass ? [a, b, idA, idB] : [b, a, idB, idA];
-        const massDiff = big.mass - small.mass;
-        if (massDiff <= 0) continue;
-
-        const damage = massDiff * PLAYER.DAMAGE_PER_MASS_DIFF;
-        small.health = Math.max(0, small.health - damage);
-
-        if (small.health <= 0) {
-          this.killPlayer(smallId, bigId);
-        }
-      }
-    }
-  }
-
-  private killPlayer(victimId: string, killerId: string) {
-    const victim = this.state.players.get(victimId);
-    const killer = this.state.players.get(killerId);
-    if (!victim) return;
-
-    victim.state = "dead";
-    victim.deaths += 1;
-
-    if (killer) {
-      const gainedMass = victim.mass * 0.5;
-      killer.mass = Math.min(killer.mass + gainedMass, PLAYER.MAX_MASS);
-      killer.kills += 1;
-      killer.score += 50;
-      this.addXp(killer, XP.PER_KILL);
-    }
-
-    this.broadcast(MSG.KILL_FEED, {
-      victim: victim.name,
-      killer: killer?.name ?? "the arena",
-    });
-
-    const client = this.clients.find((c) => c.sessionId === victimId);
-    client?.send(MSG.KILLED, { by: killer?.name ?? "the arena" });
-
-    this.clock.setTimeout(() => {
-      if (this.state.players.has(victimId)) {
-        this.respawnPlayer(victimId);
-      }
-    }, PLAYER.RESPAWN_DELAY_MS);
   }
 
   private addXp(player: PlayerSchema, amount: number) {

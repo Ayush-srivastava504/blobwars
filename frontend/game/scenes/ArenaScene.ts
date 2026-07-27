@@ -19,7 +19,8 @@ interface PendingInput extends InputMessage {}
 interface RemoteVisual {
   container: Phaser.GameObjects.Container;
   shadow: Phaser.GameObjects.Ellipse;
-  circle: Phaser.GameObjects.Arc;
+  sprite: Phaser.GameObjects.Sprite;
+  gun: Phaser.GameObjects.Image;
   nameText: Phaser.GameObjects.Text;
   healthBarBg: Phaser.GameObjects.Rectangle;
   healthBarFill: Phaser.GameObjects.Rectangle;
@@ -28,6 +29,32 @@ interface RemoteVisual {
   targetMass: number;
   wasAlive: boolean;
 }
+
+interface ZombieVisual {
+  container: Phaser.GameObjects.Container;
+  shadow: Phaser.GameObjects.Ellipse;
+  sprite: Phaser.GameObjects.Sprite;
+  healthBarBg: Phaser.GameObjects.Rectangle;
+  healthBarFill: Phaser.GameObjects.Rectangle;
+  targetX: number;
+  targetY: number;
+  maxHealth: number;
+  wasAlive: boolean;
+}
+
+// Hero source frames are 110x239; display them at a fixed on-screen height
+// and derive width from the frame's aspect ratio so the art doesn't stretch.
+const HERO_FRAME_W = 110;
+const HERO_FRAME_H = 239;
+const HERO_DISPLAY_H = 72;
+const HERO_DISPLAY_W = Math.round((HERO_FRAME_W / HERO_FRAME_H) * HERO_DISPLAY_H);
+
+// Zombie sheet is 8 frames of 96x96 laid out horizontally.
+const ZOMBIE_FRAME_SIZE = 96;
+const ZOMBIE_DISPLAY_SIZE = 56;
+
+const GUN_DISPLAY_W = 30;
+const GUN_DISPLAY_H = 20;
 
 export interface GameUICallbacks {
   onSelfUpdate: (data: {
@@ -59,13 +86,16 @@ export class ArenaScene extends Phaser.Scene {
   private remotePlayers = new Map<string, RemoteVisual>();
   private foodVisuals = new Map<string, Phaser.GameObjects.Arc>();
   private obstacleVisuals = new Map<string, Phaser.GameObjects.Arc>();
+  private zombieVisuals = new Map<string, ZombieVisual>();
 
   private selfShadow?: Phaser.GameObjects.Ellipse;
-  private selfCircle?: Phaser.GameObjects.Arc;
+  private selfSprite?: Phaser.GameObjects.Sprite;
+  private selfGun?: Phaser.GameObjects.Image;
   private selfContainer?: Phaser.GameObjects.Container;
   private selfWasAlive = true;
   private selfLevel = 1;
   private selfHealth = 100;
+  private selfFacing = 1;
 
   private inputSeq = 0;
   private pendingInputs: PendingInput[] = [];
@@ -88,10 +118,23 @@ export class ArenaScene extends Phaser.Scene {
     this.ui = data.ui;
   }
 
+  preload() {
+    for (let i = 1; i <= 6; i++) {
+      const n = String(i).padStart(2, "0");
+      this.load.image(`hero-walk-${n}`, `/assets/hero/hero-walk-${n}.png`);
+    }
+    this.load.image("pistol", "/assets/weapons/pistol.png");
+    this.load.spritesheet("zombie-idle", "/assets/zombie/zombie-idle.png", {
+      frameWidth: ZOMBIE_FRAME_SIZE,
+      frameHeight: ZOMBIE_FRAME_SIZE,
+    });
+  }
+
   create() {
     this.cameras.main.setBounds(0, 0, WORLD.WIDTH, WORLD.HEIGHT);
     this.physics.world.setBounds(0, 0, WORLD.WIDTH, WORLD.HEIGHT);
     this.drawGrid();
+    this.createAnimations();
 
     const $ = getStateCallbacks(this.room);
 
@@ -119,6 +162,25 @@ export class ArenaScene extends Phaser.Scene {
       circle?.destroy();
       this.foodVisuals.delete(id);
       this.handlePossibleSelfFoodPickup(food.x, food.y);
+    });
+
+    $(this.room.state).zombies.onAdd((zombie) => {
+      this.createZombieVisual(zombie.id, zombie.x, zombie.y, zombie.health, zombie.maxHealth, zombie.state === "alive");
+      $(zombie).onChange(() => {
+        const zv = this.zombieVisuals.get(zombie.id);
+        if (!zv) return;
+        zv.targetX = zombie.x;
+        zv.targetY = zombie.y;
+        const alive = zombie.state === "alive";
+        const pct = Phaser.Math.Clamp(zombie.health / zv.maxHealth, 0, 1);
+        zv.healthBarFill.setSize(40 * pct, 5);
+        this.handleZombieStateTransition(zv, alive);
+      });
+    });
+    $(this.room.state).zombies.onRemove((_zombie, id) => {
+      const zv = this.zombieVisuals.get(id);
+      zv?.container.destroy();
+      this.zombieVisuals.delete(id);
     });
 
     $(this.room.state).players.onAdd((player, sessionId) => {
@@ -213,11 +275,43 @@ export class ArenaScene extends Phaser.Scene {
     border.strokeRect(0, 0, WORLD.WIDTH, WORLD.HEIGHT);
   }
 
-  private createSelfVisual(x: number, y: number, mass: number, color: number) {
+  private createAnimations() {
+    if (!this.anims.exists("hero-walk")) {
+      this.anims.create({
+        key: "hero-walk",
+        frames: [
+          { key: "hero-walk-01" },
+          { key: "hero-walk-02" },
+          { key: "hero-walk-03" },
+          { key: "hero-walk-04" },
+          { key: "hero-walk-05" },
+          { key: "hero-walk-06" },
+        ],
+        frameRate: 10,
+        repeat: -1,
+      });
+    }
+    if (!this.anims.exists("zombie-walk")) {
+      this.anims.create({
+        key: "zombie-walk",
+        frames: this.anims.generateFrameNumbers("zombie-idle", { start: 0, end: 7 }),
+        frameRate: 8,
+        repeat: -1,
+      });
+    }
+  }
+
+  private createSelfVisual(x: number, y: number, mass: number, _color: number) {
     const radius = massToRadius(mass);
     this.selfShadow = this.add.ellipse(0, radius * 0.55, radius * 1.6, radius * 0.7, 0x000000, 0.25);
-    this.selfCircle = this.add.circle(0, 0, radius, color, 1).setStrokeStyle(3, 0xffffff, 0.9);
-    this.selfContainer = this.add.container(x, y, [this.selfShadow, this.selfCircle]);
+    this.selfSprite = this.add
+      .sprite(0, 0, "hero-walk-01")
+      .setDisplaySize(HERO_DISPLAY_W, HERO_DISPLAY_H)
+      .setOrigin(0.5, 0.8);
+    this.selfGun = this.add
+      .image(HERO_DISPLAY_W * 0.3, -HERO_DISPLAY_H * 0.15, "pistol")
+      .setDisplaySize(GUN_DISPLAY_W, GUN_DISPLAY_H);
+    this.selfContainer = this.add.container(x, y, [this.selfShadow, this.selfSprite, this.selfGun]);
     this.cameras.main.startFollow(this.selfContainer, true, 0.12, 0.12);
   }
 
@@ -226,25 +320,33 @@ export class ArenaScene extends Phaser.Scene {
     x: number,
     y: number,
     mass: number,
-    color: number,
+    _color: number,
     name: string,
     alive: boolean
   ) {
     const radius = massToRadius(mass);
     const shadow = this.add.ellipse(0, radius * 0.55, radius * 1.6, radius * 0.7, 0x000000, 0.25);
-    const circle = this.add.circle(0, 0, radius, color, 1).setStrokeStyle(2, 0xffffff, 0.6);
+    const sprite = this.add
+      .sprite(0, 0, "hero-walk-01")
+      .setDisplaySize(HERO_DISPLAY_W, HERO_DISPLAY_H)
+      .setOrigin(0.5, 0.8)
+      .play("hero-walk");
+    const gun = this.add
+      .image(HERO_DISPLAY_W * 0.3, -HERO_DISPLAY_H * 0.15, "pistol")
+      .setDisplaySize(GUN_DISPLAY_W, GUN_DISPLAY_H);
     const nameText = this.add
-      .text(0, -radius - 16, name, { fontSize: "13px", color: "#ffffff", fontFamily: "Rubik, sans-serif" })
+      .text(0, -HERO_DISPLAY_H - 10, name, { fontSize: "13px", color: "#ffffff", fontFamily: "Rubik, sans-serif" })
       .setOrigin(0.5);
-    const healthBarBg = this.add.rectangle(0, -radius - 6, 40, 5, 0x000000, 0.5);
-    const healthBarFill = this.add.rectangle(-20, -radius - 6, 40, 5, 0x2ecc71, 1).setOrigin(0, 0.5);
+    const healthBarBg = this.add.rectangle(0, -HERO_DISPLAY_H, 40, 5, 0x000000, 0.5);
+    const healthBarFill = this.add.rectangle(-20, -HERO_DISPLAY_H, 40, 5, 0x2ecc71, 1).setOrigin(0, 0.5);
 
-    const container = this.add.container(x, y, [shadow, circle, healthBarBg, healthBarFill, nameText]);
+    const container = this.add.container(x, y, [shadow, sprite, gun, healthBarBg, healthBarFill, nameText]);
     container.setAlpha(alive ? 1 : 0.15);
     this.remotePlayers.set(sessionId, {
       container,
       shadow,
-      circle,
+      sprite,
+      gun,
       nameText,
       healthBarBg,
       healthBarFill,
@@ -253,6 +355,45 @@ export class ArenaScene extends Phaser.Scene {
       targetMass: mass,
       wasAlive: alive,
     });
+  }
+
+  private createZombieVisual(id: string, x: number, y: number, health: number, maxHealth: number, alive: boolean) {
+    const shadow = this.add.ellipse(0, ZOMBIE_DISPLAY_SIZE * 0.4, ZOMBIE_DISPLAY_SIZE * 1.1, ZOMBIE_DISPLAY_SIZE * 0.45, 0x000000, 0.25);
+    const sprite = this.add
+      .sprite(0, 0, "zombie-idle", 0)
+      .setDisplaySize(ZOMBIE_DISPLAY_SIZE, ZOMBIE_DISPLAY_SIZE)
+      .setOrigin(0.5, 0.75)
+      .play("zombie-walk");
+    const pct = Phaser.Math.Clamp(health / maxHealth, 0, 1);
+    const healthBarBg = this.add.rectangle(0, -ZOMBIE_DISPLAY_SIZE - 6, 40, 5, 0x000000, 0.5);
+    const healthBarFill = this.add
+      .rectangle(-20, -ZOMBIE_DISPLAY_SIZE - 6, 40 * pct, 5, 0xff4f5e, 1)
+      .setOrigin(0, 0.5);
+
+    const container = this.add.container(x, y, [shadow, sprite, healthBarBg, healthBarFill]);
+    container.setAlpha(alive ? 1 : 0.15);
+    this.zombieVisuals.set(id, {
+      container,
+      shadow,
+      sprite,
+      healthBarBg,
+      healthBarFill,
+      targetX: x,
+      targetY: y,
+      maxHealth,
+      wasAlive: alive,
+    });
+  }
+
+  private handleZombieStateTransition(zv: ZombieVisual, alive: boolean) {
+    if (zv.wasAlive && !alive) {
+      zv.sprite.stop();
+      this.tweens.add({ targets: zv.container, alpha: 0.15, duration: 250 });
+    } else if (!zv.wasAlive && alive) {
+      zv.sprite.play("zombie-walk");
+      this.tweens.add({ targets: zv.container, alpha: 1, duration: 250 });
+    }
+    zv.wasAlive = alive;
   }
 
   private handleSelfStateTransition(state: string) {
@@ -367,22 +508,37 @@ export class ArenaScene extends Phaser.Scene {
           const next = stepPosition(this.selfContainer.x, this.selfContainer.y, dir.x, dir.y, player.mass, sendInterval / 1000);
           this.selfContainer.setPosition(next.x, next.y);
           const radius = massToRadius(player.mass);
-          this.selfCircle?.setRadius(radius);
           this.selfShadow?.setSize(radius * 1.6, radius * 0.7).setY(radius * 0.55);
+          if (Math.abs(dir.x) > 0.05) {
+            this.selfFacing = dir.x < 0 ? -1 : 1;
+            this.selfSprite?.setFlipX(this.selfFacing < 0);
+            this.selfGun?.setFlipX(this.selfFacing < 0).setX(HERO_DISPLAY_W * 0.3 * this.selfFacing);
+          }
+          if (dir.x !== 0 || dir.y !== 0) this.selfSprite?.play("hero-walk", true);
+          else this.selfSprite?.stop();
         }
       }
     }
 
     const lerpFactor = Math.min(1, delta / 100);
     for (const rv of this.remotePlayers.values()) {
+      const dx = rv.targetX - rv.container.x;
+      if (Math.abs(dx) > 0.5) {
+        const facing = dx < 0 ? -1 : 1;
+        rv.sprite.setFlipX(facing < 0);
+        rv.gun.setFlipX(facing < 0).setX(HERO_DISPLAY_W * 0.3 * facing);
+      }
       rv.container.x = Phaser.Math.Linear(rv.container.x, rv.targetX, lerpFactor);
       rv.container.y = Phaser.Math.Linear(rv.container.y, rv.targetY, lerpFactor);
       const radius = massToRadius(rv.targetMass);
-      rv.circle.setRadius(radius);
       rv.shadow.setSize(radius * 1.6, radius * 0.7).setY(radius * 0.55);
-      rv.nameText.setY(-radius - 16);
-      rv.healthBarBg.setY(-radius - 6);
-      rv.healthBarFill.setY(-radius - 6);
+    }
+
+    for (const zv of this.zombieVisuals.values()) {
+      const dx = zv.targetX - zv.container.x;
+      if (Math.abs(dx) > 0.5) zv.sprite.setFlipX(dx < 0);
+      zv.container.x = Phaser.Math.Linear(zv.container.x, zv.targetX, lerpFactor);
+      zv.container.y = Phaser.Math.Linear(zv.container.y, zv.targetY, lerpFactor);
     }
 
     this.emitMinimap();
@@ -407,7 +563,6 @@ export class ArenaScene extends Phaser.Scene {
     }
 
     this.selfContainer.setPosition(x, y);
-    this.selfCircle?.setRadius(massToRadius(mass));
   }
 
   private refreshScoreboard() {
