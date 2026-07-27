@@ -386,6 +386,14 @@ export class ArenaScene extends Phaser.Scene {
       .sprite(0, 0, "hero-walk-01")
       .setDisplaySize(HERO_DISPLAY_W, HERO_DISPLAY_H)
       .setOrigin(0.5, 0.8);
+    // The hero-walk source frames are each a different native size, so a
+    // display size set once (above) gets thrown off every time the
+    // animation switches frames — the sprite visibly grows/shrinks/warps
+    // each frame instead of looking like a clean walk cycle. Re-pin the
+    // display size on every animation frame change to keep it stable.
+    this.selfSprite.on(Phaser.Animations.Events.ANIMATION_UPDATE, () => {
+      this.selfSprite?.setDisplaySize(HERO_DISPLAY_W, HERO_DISPLAY_H);
+    });
     this.selfGun = this.add
       .image(HERO_DISPLAY_W * 0.3, -HERO_DISPLAY_H * 0.15, "pistol")
       .setDisplaySize(GUN_DISPLAY_W, GUN_DISPLAY_H);
@@ -409,6 +417,11 @@ export class ArenaScene extends Phaser.Scene {
       .setDisplaySize(HERO_DISPLAY_W, HERO_DISPLAY_H)
       .setOrigin(0.5, 0.8)
       .play("hero-walk");
+    // Same fix as the self sprite: keep display size stable across frames
+    // of differing native size.
+    sprite.on(Phaser.Animations.Events.ANIMATION_UPDATE, () => {
+      sprite.setDisplaySize(HERO_DISPLAY_W, HERO_DISPLAY_H);
+    });
     const gun = this.add
       .image(HERO_DISPLAY_W * 0.3, -HERO_DISPLAY_H * 0.15, "pistol")
       .setDisplaySize(GUN_DISPLAY_W, GUN_DISPLAY_H);
@@ -558,10 +571,40 @@ export class ArenaScene extends Phaser.Scene {
     // moment where the schema doesn't yet (or no longer) have players synced.
     if (!this.room?.state?.players) return;
 
-    if (this.selfContainer && this.room.state.players.get(this.sessionId)?.state === "alive") {
-      const dir = this.getInputDirection();
-      const now = Date.now();
+    const selfPlayer = this.selfContainer ? this.room.state.players.get(this.sessionId) : undefined;
 
+    if (this.selfContainer && selfPlayer?.state === "alive") {
+      const dir = this.getInputDirection();
+
+      // Predict + animate on EVERY rendered frame (using the real frame delta)
+      // so movement and the walk animation stay smooth at full framerate,
+      // regardless of the slower, fixed-rate network send below. Previously
+      // this whole block only ran once per network tick (~33ms), which made
+      // movement/animation look choppy and stutter-stop between sends.
+      const dtSeconds = delta / 1000;
+      const next = stepPosition(this.selfContainer.x, this.selfContainer.y, dir.x, dir.y, selfPlayer.mass, dtSeconds);
+      this.selfContainer.setPosition(next.x, next.y);
+      const radius = massToRadius(selfPlayer.mass);
+      this.selfShadow?.setSize(radius * 1.6, radius * 0.7).setY(radius * 0.55);
+
+      const isMoving = dir.x !== 0 || dir.y !== 0;
+      if (isMoving) {
+        this.selfFacing = dir.x < 0 ? -1 : 1;
+        this.selfSprite?.setFlipX(this.selfFacing < 0);
+        const angle = Math.atan2(dir.y, dir.x);
+        const gunAngle = this.selfFacing < 0 ? Math.PI - angle : angle;
+        this.selfGun
+          ?.setFlipX(this.selfFacing < 0)
+          .setPosition(HERO_DISPLAY_W * 0.3 * this.selfFacing, -HERO_DISPLAY_H * 0.15)
+          .setRotation(gunAngle);
+        this.selfSprite?.play("hero-walk", true);
+      } else {
+        this.selfSprite?.stop();
+      }
+
+      // Network send stays on its own fixed cadence (SIM.TICK_RATE), fully
+      // decoupled from rendering above, so server load/bandwidth is unaffected.
+      const now = Date.now();
       const sendInterval = 1000 / SIM.TICK_RATE;
       if (now - this.lastSentAt >= sendInterval) {
         this.lastSentAt = now;
@@ -569,33 +612,6 @@ export class ArenaScene extends Phaser.Scene {
         this.room.send(MSG.INPUT, input);
         this.pendingInputs.push(input);
         if (this.pendingInputs.length > 60) this.pendingInputs.shift();
-
-        const player = this.room.state.players.get(this.sessionId);
-        if (player) {
-          const next = stepPosition(
-            this.selfContainer.x,
-            this.selfContainer.y,
-            dir.x,
-            dir.y,
-            player.mass,
-            sendInterval / 1000
-          );
-          this.selfContainer.setPosition(next.x, next.y);
-          const radius = massToRadius(player.mass);
-          this.selfShadow?.setSize(radius * 1.6, radius * 0.7).setY(radius * 0.55);
-          if (dir.x !== 0 || dir.y !== 0) {
-            this.selfFacing = dir.x < 0 ? -1 : 1;
-            this.selfSprite?.setFlipX(this.selfFacing < 0);
-            const angle = Math.atan2(dir.y, dir.x);
-            const gunAngle = this.selfFacing < 0 ? Math.PI - angle : angle;
-            this.selfGun
-              ?.setFlipX(this.selfFacing < 0)
-              .setPosition(HERO_DISPLAY_W * 0.3 * this.selfFacing, -HERO_DISPLAY_H * 0.15)
-              .setRotation(gunAngle);
-          }
-          if (dir.x !== 0 || dir.y !== 0) this.selfSprite?.play("hero-walk", true);
-          else this.selfSprite?.stop();
-        }
       }
     }
 

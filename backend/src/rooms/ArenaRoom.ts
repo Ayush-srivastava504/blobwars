@@ -186,6 +186,20 @@ export class ArenaRoom extends Room<ArenaState> {
   }
 
   private tick(dtSeconds: number) {
+    // A thrown error in here previously meant the whole fixed-rate simulation
+    // loop for this room could stop advancing (no player movement resolution,
+    // no zombie AI, no wave spawns) for every client in the room, with no
+    // obvious symptom other than everything appearing frozen. Isolate each
+    // tick so one bad frame logs and gets skipped instead of stalling the
+    // whole room permanently.
+    try {
+      this.runTick(dtSeconds);
+    } catch (err) {
+      console.error("[ArenaRoom] tick() failed, skipping this frame:", err);
+    }
+  }
+
+  private runTick(dtSeconds: number) {
     this.state.serverTime = Date.now();
 
     for (const [sessionId, player] of this.state.players) {
