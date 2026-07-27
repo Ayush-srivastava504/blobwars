@@ -88,6 +88,10 @@ export function playRespawn() {
   sweep(200, 700, 250, "sine", 0.15);
 }
 
+export function playAttack() {
+  sweep(500, 180, 140, "sawtooth", 0.16);
+}
+
 export function playLevelUp() {
   tone(523, 100, "triangle", 0.15);
   tone(659, 100, "triangle", 0.15, 90);

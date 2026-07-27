@@ -1,18 +1,20 @@
 // Main Phaser scene: renders the arena, players, food, and obstacles
 // from Colyseus room state, and sends local input back to the server.
 // Handles client-side prediction/reconciliation, remote interpolation,
-// shadows/animations/particles/SFX polish, and joystick + mouse input.
+// shadows/animations/particles/SFX polish, and tap-to-move + double-tap
+// lunge-attack input.
 import * as Phaser from "phaser";
 import { Room, getStateCallbacks } from "colyseus.js";
 import {
   WORLD,
   SIM,
+  ATTACK,
   massToRadius,
   stepPosition,
   MSG,
 } from "@blobwars/shared";
 import type { InputMessage } from "@blobwars/shared";
-import { playEat, playHit, playKill, playDeath, playRespawn, playLevelUp } from "../../lib/sfx";
+import { playEat, playHit, playKill, playDeath, playRespawn, playLevelUp, playAttack } from "../../lib/sfx";
 
 interface PendingInput extends InputMessage {}
 
@@ -65,6 +67,7 @@ export interface GameUICallbacks {
     xp: number;
     xpNeeded: number;
     score: number;
+    coins: number;
     state: string;
   }) => void;
   onScoreboard: (entries: { id: string; name: string; score: number; kills: number }[]) => void;
@@ -76,6 +79,7 @@ export interface GameUICallbacks {
     self: { x: number; y: number },
     others: { x: number; y: number; color: number }[]
   ) => void;
+  onWaveUpdate: (data: { wave: number; waveState: string; waveEndsOrStartsAt: number }) => void;
 }
 
 export class ArenaScene extends Phaser.Scene {
@@ -105,8 +109,16 @@ export class ArenaScene extends Phaser.Scene {
   private fpsAccum = 0;
   private fpsFrames = 0;
 
-  private joystickDir = { x: 0, y: 0 };
-  private joystickActive = false;
+  private moveTarget: { x: number; y: number } | null = null;
+  private attackDir = { x: 0, y: 0 };
+  private attackUntil = 0;
+  private lastTapAt = 0;
+  private lastTapScreenX = 0;
+  private lastTapScreenY = 0;
+
+  private static readonly DOUBLE_TAP_MS = 300;
+  private static readonly DOUBLE_TAP_DIST = 60;
+  private static readonly MOVE_ARRIVE_DIST = 10;
 
   constructor() {
     super("ArenaScene");
@@ -214,6 +226,7 @@ export class ArenaScene extends Phaser.Scene {
             xp: player.xp,
             xpNeeded: Math.floor(100 * Math.pow(1.15, player.level - 1)),
             score: player.score,
+            coins: player.coins,
             state: player.state,
           });
         } else {
@@ -256,11 +269,66 @@ export class ArenaScene extends Phaser.Scene {
 
     this.input.mouse?.disableContextMenu();
     this.time.addEvent({ delay: 2000, loop: true, callback: () => this.sendPing() });
+
+    const emitWave = () => {
+      this.ui.onWaveUpdate({
+        wave: this.room.state.wave,
+        waveState: this.room.state.waveState,
+        waveEndsOrStartsAt: this.room.state.waveEndsOrStartsAt,
+      });
+    };
+    $(this.room.state).listen("wave", emitWave);
+    $(this.room.state).listen("waveState", emitWave);
+    $(this.room.state).listen("waveEndsOrStartsAt", emitWave);
+    emitWave();
+
+    this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => this.handleTap(pointer));
   }
 
-  setJoystickDirection(x: number, y: number, active: boolean) {
-    this.joystickDir = { x, y };
-    this.joystickActive = active;
+  private handleTap(pointer: Phaser.Input.Pointer) {
+    const now = Date.now();
+    const dx = pointer.x - this.lastTapScreenX;
+    const dy = pointer.y - this.lastTapScreenY;
+    const isDoubleTap =
+      now - this.lastTapAt <= ArenaScene.DOUBLE_TAP_MS && Math.hypot(dx, dy) <= ArenaScene.DOUBLE_TAP_DIST;
+
+    const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+
+    if (isDoubleTap) {
+      this.lastTapAt = 0;
+      this.startAttack(world.x, world.y);
+    } else {
+      this.lastTapAt = now;
+      this.lastTapScreenX = pointer.x;
+      this.lastTapScreenY = pointer.y;
+      this.moveTarget = { x: world.x, y: world.y };
+    }
+  }
+
+  private startAttack(worldX: number, worldY: number) {
+    if (!this.selfContainer) return;
+    const dx = worldX - this.selfContainer.x;
+    const dy = worldY - this.selfContainer.y;
+    const len = Math.hypot(dx, dy) || 1;
+    this.attackDir = { x: dx / len, y: dy / len };
+    this.attackUntil = Date.now() + ATTACK.DURATION_MS;
+    this.moveTarget = null;
+    this.spawnAttackFlash(this.selfContainer.x, this.selfContainer.y, dx / len, dy / len);
+    playAttack();
+  }
+
+  private spawnAttackFlash(x: number, y: number, dirX: number, dirY: number) {
+    const tipX = x + dirX * 40;
+    const tipY = y + dirY * 40;
+    const flash = this.add.circle(tipX, tipY, 10, 0xffe066, 0.9);
+    this.tweens.add({
+      targets: flash,
+      scale: { from: 0.6, to: 1.8 },
+      alpha: 0,
+      duration: 220,
+      ease: "Cubic.easeOut",
+      onComplete: () => flash.destroy(),
+    });
   }
 
   private drawGrid() {
@@ -463,18 +531,22 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   private getInputDirection(): { x: number; y: number } {
-    if (this.joystickActive) {
-      return this.joystickDir;
+    if (Date.now() < this.attackUntil) {
+      return this.attackDir;
     }
-    const pointer = this.input.activePointer;
-    const cam = this.cameras.main;
-    const centerX = cam.width / 2;
-    const centerY = cam.height / 2;
-    const dx = pointer.x - centerX;
-    const dy = pointer.y - centerY;
+    if (!this.moveTarget || !this.selfContainer) return { x: 0, y: 0 };
+    const dx = this.moveTarget.x - this.selfContainer.x;
+    const dy = this.moveTarget.y - this.selfContainer.y;
     const len = Math.hypot(dx, dy);
-    if (len < 8) return { x: 0, y: 0 };
+    if (len <= ArenaScene.MOVE_ARRIVE_DIST) {
+      this.moveTarget = null;
+      return { x: 0, y: 0 };
+    }
     return { x: dx / len, y: dy / len };
+  }
+
+  private isAttacking(): boolean {
+    return Date.now() < this.attackUntil;
   }
 
   private sendPing() {
@@ -495,24 +567,38 @@ export class ArenaScene extends Phaser.Scene {
       const dir = this.getInputDirection();
       const now = Date.now();
 
+      const attacking = this.isAttacking();
       const sendInterval = 1000 / SIM.TICK_RATE;
       if (now - this.lastSentAt >= sendInterval) {
         this.lastSentAt = now;
-        const input: PendingInput = { seq: ++this.inputSeq, dirX: dir.x, dirY: dir.y, boost: false, timestamp: now };
+        const input: PendingInput = { seq: ++this.inputSeq, dirX: dir.x, dirY: dir.y, boost: attacking, timestamp: now };
         this.room.send(MSG.INPUT, input);
         this.pendingInputs.push(input);
         if (this.pendingInputs.length > 60) this.pendingInputs.shift();
 
         const player = this.room.state.players.get(this.sessionId);
         if (player) {
-          const next = stepPosition(this.selfContainer.x, this.selfContainer.y, dir.x, dir.y, player.mass, sendInterval / 1000);
+          const next = stepPosition(
+            this.selfContainer.x,
+            this.selfContainer.y,
+            dir.x,
+            dir.y,
+            player.mass,
+            sendInterval / 1000,
+            attacking ? ATTACK.SPEED_MULT : 1
+          );
           this.selfContainer.setPosition(next.x, next.y);
           const radius = massToRadius(player.mass);
           this.selfShadow?.setSize(radius * 1.6, radius * 0.7).setY(radius * 0.55);
-          if (Math.abs(dir.x) > 0.05) {
+          if (dir.x !== 0 || dir.y !== 0) {
             this.selfFacing = dir.x < 0 ? -1 : 1;
             this.selfSprite?.setFlipX(this.selfFacing < 0);
-            this.selfGun?.setFlipX(this.selfFacing < 0).setX(HERO_DISPLAY_W * 0.3 * this.selfFacing);
+            const angle = Math.atan2(dir.y, dir.x);
+            const gunAngle = this.selfFacing < 0 ? Math.PI - angle : angle;
+            this.selfGun
+              ?.setFlipX(this.selfFacing < 0)
+              .setPosition(HERO_DISPLAY_W * 0.3 * this.selfFacing, -HERO_DISPLAY_H * 0.15)
+              .setRotation(gunAngle);
           }
           if (dir.x !== 0 || dir.y !== 0) this.selfSprite?.play("hero-walk", true);
           else this.selfSprite?.stop();
@@ -523,10 +609,16 @@ export class ArenaScene extends Phaser.Scene {
     const lerpFactor = Math.min(1, delta / 100);
     for (const rv of this.remotePlayers.values()) {
       const dx = rv.targetX - rv.container.x;
-      if (Math.abs(dx) > 0.5) {
+      const dy = rv.targetY - rv.container.y;
+      if (Math.hypot(dx, dy) > 0.5) {
         const facing = dx < 0 ? -1 : 1;
+        const angle = Math.atan2(dy, dx);
+        const gunAngle = facing < 0 ? Math.PI - angle : angle;
         rv.sprite.setFlipX(facing < 0);
-        rv.gun.setFlipX(facing < 0).setX(HERO_DISPLAY_W * 0.3 * facing);
+        rv.gun
+          .setFlipX(facing < 0)
+          .setPosition(HERO_DISPLAY_W * 0.3 * facing, -HERO_DISPLAY_H * 0.15)
+          .setRotation(gunAngle);
       }
       rv.container.x = Phaser.Math.Linear(rv.container.x, rv.targetX, lerpFactor);
       rv.container.y = Phaser.Math.Linear(rv.container.y, rv.targetY, lerpFactor);
@@ -557,7 +649,7 @@ export class ArenaScene extends Phaser.Scene {
     let y = serverY;
     const dt = 1 / SIM.TICK_RATE;
     for (const input of this.pendingInputs) {
-      const next = stepPosition(x, y, input.dirX, input.dirY, mass, dt);
+      const next = stepPosition(x, y, input.dirX, input.dirY, mass, dt, input.boost ? ATTACK.SPEED_MULT : 1);
       x = next.x;
       y = next.y;
     }

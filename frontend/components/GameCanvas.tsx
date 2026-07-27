@@ -1,7 +1,8 @@
 // Root game component: mounts the Phaser canvas and overlays React HUD.
 // Bridges Phaser callbacks (self state, scoreboard, ping/fps, kill feed,
-// death events) into React state, and forwards joystick/mute input
-// back into the Phaser scene and the SFX module.
+// wave/coins, death events) into React state. Movement/attack input is
+// tap-to-move + double-tap handled entirely inside the Phaser scene;
+// this component only forwards mute toggling back into the SFX module.
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -12,7 +13,6 @@ import { Scoreboard } from "./Scoreboard";
 import { Minimap, MinimapData } from "./Minimap";
 import { PerfIndicators } from "./PerfIndicators";
 import { KillFeed, DeathOverlay } from "./KillFeedAndDeath";
-import { Joystick } from "./Joystick";
 import { setSfxMuted } from "../lib/sfx";
 
 export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void }) {
@@ -28,6 +28,7 @@ export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void })
     xp: 0,
     xpNeeded: 100,
     score: 0,
+    coins: 0,
     state: "alive",
   });
   const [scoreboard, setScoreboard] = useState<{ id: string; name: string; score: number; kills: number }[]>([]);
@@ -37,6 +38,9 @@ export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void })
   const [killFeed, setKillFeed] = useState<{ id: number; text: string }[]>([]);
   const [deathInfo, setDeathInfo] = useState<{ byName: string } | null>(null);
   const [muted, setMuted] = useState(false);
+  const [waveInfo, setWaveInfo] = useState<{ wave: number; waveState: string; waveEndsOrStartsAt: number } | null>(
+    null
+  );
   const killFeedId = useRef(0);
 
   useEffect(() => {
@@ -55,6 +59,7 @@ export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void })
         onPing: setPing,
         onFps: setFps,
         onMinimap: (selfPos, others) => setMinimap({ self: selfPos, others }),
+        onWaveUpdate: setWaveInfo,
         onKilled: (byName) => setDeathInfo({ byName }),
         onKillFeed: (text) =>
           setKillFeed((prev) => {
@@ -95,10 +100,6 @@ export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void })
     return () => clearTimeout(t);
   }, [killFeed]);
 
-  function handleJoystickChange(dir: { x: number; y: number }, active: boolean) {
-    sceneRef.current?.setJoystickDirection(dir.x, dir.y, active);
-  }
-
   function toggleMute() {
     setMuted((prev) => {
       const next = !prev;
@@ -124,12 +125,12 @@ export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void })
         level={self.level}
         mass={self.mass}
         score={self.score}
+        coins={self.coins}
       />
       <Scoreboard entries={scoreboard} selfId={room.sessionId} />
       <Minimap data={minimap} />
-      <PerfIndicators ping={ping} fps={fps} />
+      <PerfIndicators ping={ping} fps={fps} waveInfo={waveInfo} />
       <KillFeed messages={killFeed} />
-      <Joystick onChange={handleJoystickChange} />
 
       <button
         onClick={handleExit}

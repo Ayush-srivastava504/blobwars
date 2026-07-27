@@ -17,6 +17,7 @@ import {
   MSG,
   ZOMBIE,
   WAVE,
+  ATTACK,
   stepPosition,
   massToRadius,
   circlesOverlap,
@@ -34,6 +35,7 @@ export class ArenaRoom extends Room<ArenaState> {
 
   private inputQueues = new Map<string, PendingInput[]>();
   private lastDir = new Map<string, { x: number; y: number }>();
+  private attackUntil = new Map<string, number>();
   private matchId: string | null = null;
   private colorCursor = 0;
 
@@ -53,6 +55,9 @@ export class ArenaRoom extends Room<ArenaState> {
       const queue = this.inputQueues.get(client.sessionId);
       if (queue) {
           if (queue.length < 12) queue.push(message);
+      }
+      if (message.boost) {
+        this.attackUntil.set(client.sessionId, Date.now() + ATTACK.DURATION_MS);
       }
     });
 
@@ -129,6 +134,7 @@ export class ArenaRoom extends Room<ArenaState> {
     this.state.players.set(client.sessionId, player);
     this.inputQueues.set(client.sessionId, []);
     this.lastDir.set(client.sessionId, { x: 0, y: 0 });
+    this.attackUntil.set(client.sessionId, 0);
   }
 
   private placeAtSpawn(player: PlayerSchema) {
@@ -161,6 +167,7 @@ export class ArenaRoom extends Room<ArenaState> {
     this.state.players.delete(client.sessionId);
     this.inputQueues.delete(client.sessionId);
     this.lastDir.delete(client.sessionId);
+    this.attackUntil.delete(client.sessionId);
   }
 
   onDispose() {
@@ -194,7 +201,16 @@ export class ArenaRoom extends Room<ArenaState> {
         this.lastDir.set(sessionId, dir);
       }
 
-      const next = stepPosition(player.x, player.y, dir.x, dir.y, player.mass, dtSeconds);
+      const isAttacking = Date.now() < (this.attackUntil.get(sessionId) ?? 0);
+      const next = stepPosition(
+        player.x,
+        player.y,
+        dir.x,
+        dir.y,
+        player.mass,
+        dtSeconds,
+        isAttacking ? ATTACK.SPEED_MULT : 1
+      );
 
       const radius = massToRadius(player.mass);
       let resolvedX = next.x;
@@ -350,8 +366,11 @@ export class ArenaRoom extends Room<ArenaState> {
           }
         }
 
-        // Player's mass grinds the zombie down on contact.
-        const damage = player.mass * ZOMBIE.DAMAGE_PER_PLAYER_MASS * (1 / SIM.TICK_RATE);
+        // Player's mass grinds the zombie down on contact; a landed double-tap
+        // attack (lunge) multiplies this for a brief window.
+        const isAttacking = now < (this.attackUntil.get(playerId) ?? 0);
+        const damage =
+          player.mass * ZOMBIE.DAMAGE_PER_PLAYER_MASS * (1 / SIM.TICK_RATE) * (isAttacking ? ATTACK.DAMAGE_MULT : 1);
         zombie.health = Math.max(0, zombie.health - damage);
         if (zombie.health <= 0) {
           this.killZombie(zombieId, playerId);

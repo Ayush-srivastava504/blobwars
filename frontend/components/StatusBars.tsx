@@ -1,4 +1,4 @@
-// Bottom-center HUD: health bar, XP bar, level, mass, and score.
+// Bottom-center HUD: health bar, XP bar, level, mass, score, and coins.
 // Computes percentage fills from raw values passed down by GameCanvas.
 // Purely presentational, no internal state.
 // Bar widths are clamped to 0-100% to guard against bad input data.
@@ -12,6 +12,7 @@ export function StatusBars({
   level,
   mass,
   score,
+  coins,
 }: {
   health: number;
   maxHealth: number;
@@ -20,6 +21,7 @@ export function StatusBars({
   level: number;
   mass: number;
   score: number;
+  coins: number;
 }) {
   const healthPct = Math.max(0, Math.min(100, (health / maxHealth) * 100));
   const xpPct = Math.max(0, Math.min(100, (xp / xpNeeded) * 100));
@@ -29,7 +31,10 @@ export function StatusBars({
       <div className="flex justify-between text-xs mb-1 text-white/80">
         <span>Lv.{level}</span>
         <span>Mass {Math.round(mass)}</span>
-        <span>Score {score}</span>
+        <span className="flex items-center gap-2">
+          <span className="text-yellow-400">🪙 {coins}</span>
+          <span>Score {score}</span>
+        </span>
       </div>
       <div className="h-3 rounded-full bg-black/50 overflow-hidden border border-white/10">
         <div

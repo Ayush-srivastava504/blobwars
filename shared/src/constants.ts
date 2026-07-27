@@ -86,6 +86,12 @@ export const ZOMBIE = {
   COINS_PER_KILL: 10,
 } as const;
 
+export const ATTACK = {
+  DURATION_MS: 300,
+  SPEED_MULT: 1.8,
+  DAMAGE_MULT: 3,
+} as const;
+
 export const WAVE = {
   BASE_COUNT: 5,
   COUNT_GROWTH_PER_WAVE: 3,

@@ -39,12 +39,13 @@ export function stepPosition(
   dirX: number,
   dirY: number,
   mass: number,
-  dtSeconds: number
+  dtSeconds: number,
+  speedMult: number = 1
 ): Vector2Like {
   const len = Math.hypot(dirX, dirY) || 1;
   const nx = dirX / len;
   const ny = dirY / len;
-  const speed = massToSpeed(mass);
+  const speed = massToSpeed(mass) * speedMult;
   const radius = massToRadius(mass);
 
   let nextX = x + nx * speed * dtSeconds;
