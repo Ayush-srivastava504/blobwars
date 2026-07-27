@@ -76,6 +76,7 @@ export class ArenaScene extends Phaser.Scene {
   private fpsFrames = 0;
 
   private joystickDir = { x: 0, y: 0 };
+  private joystickActive = false;
 
   constructor() {
     super("ArenaScene");
@@ -195,8 +196,9 @@ export class ArenaScene extends Phaser.Scene {
     this.time.addEvent({ delay: 2000, loop: true, callback: () => this.sendPing() });
   }
 
-  setJoystickDirection(x: number, y: number) {
+  setJoystickDirection(x: number, y: number, active: boolean) {
     this.joystickDir = { x, y };
+    this.joystickActive = active;
   }
 
   private drawGrid() {
@@ -320,7 +322,7 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   private getInputDirection(): { x: number; y: number } {
-    if (this.joystickDir.x !== 0 || this.joystickDir.y !== 0) {
+    if (this.joystickActive) {
       return this.joystickDir;
     }
     const pointer = this.input.activePointer;

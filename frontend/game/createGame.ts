@@ -8,7 +8,12 @@ import { ArenaScene, GameUICallbacks } from "./scenes/ArenaScene";
 
 export function createGame(parent: HTMLDivElement, room: Room, ui: GameUICallbacks): Phaser.Game {
   const game = new Phaser.Game({
-    type: Phaser.WEBGL,
+    // AUTO tries WebGL first but falls back to Canvas2D if a WebGL context
+    // can't be created — important on repeat play sessions, since the
+    // previous game's WebGL context may not be reclaimed by the browser/GPU
+    // process instantly, and forcing WEBGL would otherwise render a blank
+    // black canvas instead of gracefully falling back.
+    type: Phaser.AUTO,
     parent,
     width: window.innerWidth,
     height: window.innerHeight,

@@ -74,7 +74,16 @@ export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void })
     return () => {
       disposed = true;
       (gameRef.current as any)?._cleanupResize?.();
-      gameRef.current?.destroy(true);
+      const game = gameRef.current;
+      if (game) {
+        try {
+          const gl = (game.renderer as any)?.gl;
+          gl?.getExtension("WEBGL_lose_context")?.loseContext();
+        } catch {
+          // best-effort only
+        }
+        game.destroy(true, false);
+      }
       gameRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -86,8 +95,8 @@ export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void })
     return () => clearTimeout(t);
   }, [killFeed]);
 
-  function handleJoystickChange(dir: { x: number; y: number }) {
-    sceneRef.current?.setJoystickDirection(dir.x, dir.y);
+  function handleJoystickChange(dir: { x: number; y: number }, active: boolean) {
+    sceneRef.current?.setJoystickDirection(dir.x, dir.y, active);
   }
 
   function toggleMute() {

@@ -10,7 +10,11 @@ const BASE_SIZE = 110;
 const STICK_SIZE = 50;
 const MAX_OFFSET = (BASE_SIZE - STICK_SIZE) / 2;
 
-export function Joystick({ onChange }: { onChange: (dir: { x: number; y: number }) => void }) {
+export function Joystick({
+  onChange,
+}: {
+  onChange: (dir: { x: number; y: number }, active: boolean) => void;
+}) {
   const baseRef = useRef<HTMLDivElement>(null);
   const activePointerId = useRef<number | null>(null);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -32,9 +36,11 @@ export function Joystick({ onChange }: { onChange: (dir: { x: number; y: number 
 
     const magnitude = Math.min(len / MAX_OFFSET, 1);
     if (magnitude < 0.15) {
-      onChange({ x: 0, y: 0 });
+      // Still actively held, just centered — report zero movement but keep
+      // control so a stray mouse/touch position elsewhere can't hijack aim.
+      onChange({ x: 0, y: 0 }, true);
     } else {
-      onChange({ x: dx / len, y: dy / len });
+      onChange({ x: dx / len, y: dy / len }, true);
     }
   }
 
@@ -55,7 +61,9 @@ export function Joystick({ onChange }: { onChange: (dir: { x: number; y: number 
     activePointerId.current = null;
     setActive(false);
     setOffset({ x: 0, y: 0 });
-    onChange({ x: 0, y: 0 });
+    // Release control entirely so the scene falls back to pointer/mouse aim
+    // instead of freezing on the joystick's last direction.
+    onChange({ x: 0, y: 0 }, false);
   }
 
   return (
