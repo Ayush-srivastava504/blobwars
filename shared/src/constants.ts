@@ -86,10 +86,12 @@ export const ZOMBIE = {
   COINS_PER_KILL: 10,
 } as const;
 
-export const ATTACK = {
-  DURATION_MS: 300,
-  SPEED_MULT: 1.8,
-  DAMAGE_MULT: 3,
+export const BULLET = {
+  SPEED: 900,
+  DAMAGE: 8,
+  RADIUS: 5,
+  LIFETIME_MS: 1200,
+  COOLDOWN_MS: 220,
 } as const;
 
 export const WAVE = {

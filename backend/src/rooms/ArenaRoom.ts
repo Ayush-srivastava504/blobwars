@@ -4,7 +4,7 @@
 // at a lower patch rate and records match results to the database.
 import { Room, Client } from "@colyseus/core";
 import { nanoid } from "nanoid";
-import { ArenaState, PlayerSchema, FoodSchema, ObstacleSchema, ZombieSchema } from "./schema/ArenaState";
+import { ArenaState, PlayerSchema, FoodSchema, ObstacleSchema, ZombieSchema, BulletSchema } from "./schema/ArenaState";
 import {
   WORLD,
   SIM,
@@ -17,13 +17,13 @@ import {
   MSG,
   ZOMBIE,
   WAVE,
-  ATTACK,
+  BULLET,
   stepPosition,
   massToRadius,
   circlesOverlap,
   distance,
 } from "@blobwars/shared";
-import type { InputMessage } from "@blobwars/shared";
+import type { InputMessage, ShootMessage } from "@blobwars/shared";
 import { recordMatchPlayerResult } from "../db/matchRepository";
 
 interface PendingInput extends InputMessage {}
@@ -35,9 +35,10 @@ export class ArenaRoom extends Room<ArenaState> {
 
   private inputQueues = new Map<string, PendingInput[]>();
   private lastDir = new Map<string, { x: number; y: number }>();
-  private attackUntil = new Map<string, number>();
+  private nextShotAllowedAt = new Map<string, number>();
   private matchId: string | null = null;
   private colorCursor = 0;
+  private bulletSpawnedAt = new Map<string, number>();
 
   async onCreate(options: { isPrivate?: boolean; code?: string; name?: string }) {
     this.setState(new ArenaState());
@@ -56,9 +57,10 @@ export class ArenaRoom extends Room<ArenaState> {
       if (queue) {
           if (queue.length < 12) queue.push(message);
       }
-      if (message.boost) {
-        this.attackUntil.set(client.sessionId, Date.now() + ATTACK.DURATION_MS);
-      }
+    });
+
+    this.onMessage(MSG.SHOOT, (client, message: ShootMessage) => {
+      this.handleShoot(client.sessionId, message);
     });
 
     this.onMessage(MSG.RESPAWN, (client) => {
@@ -134,7 +136,7 @@ export class ArenaRoom extends Room<ArenaState> {
     this.state.players.set(client.sessionId, player);
     this.inputQueues.set(client.sessionId, []);
     this.lastDir.set(client.sessionId, { x: 0, y: 0 });
-    this.attackUntil.set(client.sessionId, 0);
+    this.nextShotAllowedAt.set(client.sessionId, 0);
   }
 
   private placeAtSpawn(player: PlayerSchema) {
@@ -167,7 +169,7 @@ export class ArenaRoom extends Room<ArenaState> {
     this.state.players.delete(client.sessionId);
     this.inputQueues.delete(client.sessionId);
     this.lastDir.delete(client.sessionId);
-    this.attackUntil.delete(client.sessionId);
+    this.nextShotAllowedAt.delete(client.sessionId);
   }
 
   onDispose() {
@@ -201,16 +203,7 @@ export class ArenaRoom extends Room<ArenaState> {
         this.lastDir.set(sessionId, dir);
       }
 
-      const isAttacking = Date.now() < (this.attackUntil.get(sessionId) ?? 0);
-      const next = stepPosition(
-        player.x,
-        player.y,
-        dir.x,
-        dir.y,
-        player.mass,
-        dtSeconds,
-        isAttacking ? ATTACK.SPEED_MULT : 1
-      );
+      const next = stepPosition(player.x, player.y, dir.x, dir.y, player.mass, dtSeconds);
 
       const radius = massToRadius(player.mass);
       let resolvedX = next.x;
@@ -234,6 +227,85 @@ export class ArenaRoom extends Room<ArenaState> {
     this.updateWaves();
     this.updateZombies(dtSeconds);
     this.handleZombieCombat();
+    this.updateBullets(dtSeconds);
+  }
+
+  // ---- Shooting (fire-button bullets, zombies-only PvE damage) ----
+
+  private handleShoot(sessionId: string, message: ShootMessage) {
+    const player = this.state.players.get(sessionId);
+    if (!player || player.state !== "alive") return;
+
+    const now = Date.now();
+    const allowedAt = this.nextShotAllowedAt.get(sessionId) ?? 0;
+    if (now < allowedAt) return;
+    this.nextShotAllowedAt.set(sessionId, now + BULLET.COOLDOWN_MS);
+
+    const len = Math.hypot(message.dirX, message.dirY) || 1;
+    const dirX = message.dirX / len;
+    const dirY = message.dirY / len;
+    const radius = massToRadius(player.mass);
+
+    const bullet = new BulletSchema();
+    bullet.id = nanoid(8);
+    bullet.ownerId = sessionId;
+    bullet.x = player.x + dirX * (radius + 4);
+    bullet.y = player.y + dirY * (radius + 4);
+    bullet.dirX = dirX;
+    bullet.dirY = dirY;
+    this.state.bullets.set(bullet.id, bullet);
+    this.bulletSpawnedAt.set(bullet.id, now);
+  }
+
+  private updateBullets(dtSeconds: number) {
+    if (this.state.bullets.size === 0) return;
+    const now = Date.now();
+
+    for (const [bulletId, bullet] of this.state.bullets) {
+      const spawnedAt = this.bulletSpawnedAt.get(bulletId) ?? now;
+      if (now - spawnedAt >= BULLET.LIFETIME_MS) {
+        this.removeBullet(bulletId);
+        continue;
+      }
+
+      bullet.x += bullet.dirX * BULLET.SPEED * dtSeconds;
+      bullet.y += bullet.dirY * BULLET.SPEED * dtSeconds;
+
+      if (bullet.x < 0 || bullet.x > WORLD.WIDTH || bullet.y < 0 || bullet.y > WORLD.HEIGHT) {
+        this.removeBullet(bulletId);
+        continue;
+      }
+
+      let blocked = false;
+      for (const obstacle of this.state.obstacles.values()) {
+        if (circlesOverlap(bullet.x, bullet.y, BULLET.RADIUS, obstacle.x, obstacle.y, obstacle.radius)) {
+          blocked = true;
+          break;
+        }
+      }
+      if (blocked) {
+        this.removeBullet(bulletId);
+        continue;
+      }
+
+      // Zombies only — bullets never damage other players (PvE weapon).
+      for (const [zombieId, zombie] of this.state.zombies) {
+        if (zombie.state !== "alive") continue;
+        if (!circlesOverlap(bullet.x, bullet.y, BULLET.RADIUS, zombie.x, zombie.y, ZOMBIE.RADIUS)) continue;
+
+        zombie.health = Math.max(0, zombie.health - BULLET.DAMAGE);
+        this.removeBullet(bulletId);
+        if (zombie.health <= 0) {
+          this.killZombie(zombieId, bullet.ownerId);
+        }
+        break;
+      }
+    }
+  }
+
+  private removeBullet(bulletId: string) {
+    this.state.bullets.delete(bulletId);
+    this.bulletSpawnedAt.delete(bulletId);
   }
 
   // ---- Wave spawner ----
@@ -366,11 +438,8 @@ export class ArenaRoom extends Room<ArenaState> {
           }
         }
 
-        // Player's mass grinds the zombie down on contact; a landed double-tap
-        // attack (lunge) multiplies this for a brief window.
-        const isAttacking = now < (this.attackUntil.get(playerId) ?? 0);
-        const damage =
-          player.mass * ZOMBIE.DAMAGE_PER_PLAYER_MASS * (1 / SIM.TICK_RATE) * (isAttacking ? ATTACK.DAMAGE_MULT : 1);
+        // Player's mass grinds the zombie down on contact.
+        const damage = player.mass * ZOMBIE.DAMAGE_PER_PLAYER_MASS * (1 / SIM.TICK_RATE);
         zombie.health = Math.max(0, zombie.health - damage);
         if (zombie.health <= 0) {
           this.killZombie(zombieId, playerId);

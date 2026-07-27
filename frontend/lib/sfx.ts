@@ -88,8 +88,8 @@ export function playRespawn() {
   sweep(200, 700, 250, "sine", 0.15);
 }
 
-export function playAttack() {
-  sweep(500, 180, 140, "sawtooth", 0.16);
+export function playShoot() {
+  sweep(900, 300, 80, "square", 0.12);
 }
 
 export function playLevelUp() {

@@ -1,20 +1,21 @@
 // Main Phaser scene: renders the arena, players, food, and obstacles
 // from Colyseus room state, and sends local input back to the server.
 // Handles client-side prediction/reconciliation, remote interpolation,
-// shadows/animations/particles/SFX polish, and tap-to-move + double-tap
-// lunge-attack input.
+// shadows/animations/particles/SFX polish. Movement comes from a
+// virtual joystick (setMoveInput) and firing from a button (fireBullet);
+// both are driven by React overlay components in GameCanvas.
 import * as Phaser from "phaser";
 import { Room, getStateCallbacks } from "colyseus.js";
 import {
   WORLD,
   SIM,
-  ATTACK,
+  BULLET,
   massToRadius,
   stepPosition,
   MSG,
 } from "@blobwars/shared";
 import type { InputMessage } from "@blobwars/shared";
-import { playEat, playHit, playKill, playDeath, playRespawn, playLevelUp, playAttack } from "../../lib/sfx";
+import { playEat, playHit, playKill, playDeath, playRespawn, playLevelUp, playShoot } from "../../lib/sfx";
 
 interface PendingInput extends InputMessage {}
 
@@ -42,6 +43,12 @@ interface ZombieVisual {
   targetY: number;
   maxHealth: number;
   wasAlive: boolean;
+}
+
+interface BulletVisual {
+  gfx: Phaser.GameObjects.Arc;
+  targetX: number;
+  targetY: number;
 }
 
 // Hero source frames are 110x239; display them at a fixed on-screen height
@@ -91,6 +98,7 @@ export class ArenaScene extends Phaser.Scene {
   private foodVisuals = new Map<string, Phaser.GameObjects.Arc>();
   private obstacleVisuals = new Map<string, Phaser.GameObjects.Arc>();
   private zombieVisuals = new Map<string, ZombieVisual>();
+  private bulletVisuals = new Map<string, BulletVisual>();
 
   private selfShadow?: Phaser.GameObjects.Ellipse;
   private selfSprite?: Phaser.GameObjects.Sprite;
@@ -109,16 +117,12 @@ export class ArenaScene extends Phaser.Scene {
   private fpsAccum = 0;
   private fpsFrames = 0;
 
-  private moveTarget: { x: number; y: number } | null = null;
-  private attackDir = { x: 0, y: 0 };
-  private attackUntil = 0;
-  private lastTapAt = 0;
-  private lastTapScreenX = 0;
-  private lastTapScreenY = 0;
-
-  private static readonly DOUBLE_TAP_MS = 300;
-  private static readonly DOUBLE_TAP_DIST = 60;
-  private static readonly MOVE_ARRIVE_DIST = 10;
+  // Set every frame by the React virtual-joystick overlay via setMoveInput().
+  private joystickDir = { x: 0, y: 0 };
+  // Last non-zero movement direction, used to aim bullets when the player
+  // taps fire without currently pushing the joystick.
+  private aimDir = { x: 1, y: 0 };
+  private nextShotAllowedAt = 0;
 
   constructor() {
     super("ArenaScene");
@@ -267,6 +271,22 @@ export class ArenaScene extends Phaser.Scene {
     });
     this.room.onMessage(MSG.PONG, (sentAt: number) => this.ui.onPing(Date.now() - sentAt));
 
+    $(this.room.state).bullets.onAdd((bullet) => {
+      const gfx = this.add.circle(bullet.x, bullet.y, 4, 0xffe066, 1).setStrokeStyle(1, 0xff9d00);
+      this.bulletVisuals.set(bullet.id, { gfx, targetX: bullet.x, targetY: bullet.y });
+      $(bullet).onChange(() => {
+        const bv = this.bulletVisuals.get(bullet.id);
+        if (!bv) return;
+        bv.targetX = bullet.x;
+        bv.targetY = bullet.y;
+      });
+    });
+    $(this.room.state).bullets.onRemove((_bullet, id) => {
+      const bv = this.bulletVisuals.get(id);
+      bv?.gfx.destroy();
+      this.bulletVisuals.delete(id);
+    });
+
     this.input.mouse?.disableContextMenu();
     this.time.addEvent({ delay: 2000, loop: true, callback: () => this.sendPing() });
 
@@ -281,51 +301,41 @@ export class ArenaScene extends Phaser.Scene {
     $(this.room.state).listen("waveState", emitWave);
     $(this.room.state).listen("waveEndsOrStartsAt", emitWave);
     emitWave();
-
-    this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => this.handleTap(pointer));
   }
 
-  private handleTap(pointer: Phaser.Input.Pointer) {
-    const now = Date.now();
-    const dx = pointer.x - this.lastTapScreenX;
-    const dy = pointer.y - this.lastTapScreenY;
-    const isDoubleTap =
-      now - this.lastTapAt <= ArenaScene.DOUBLE_TAP_MS && Math.hypot(dx, dy) <= ArenaScene.DOUBLE_TAP_DIST;
-
-    const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
-
-    if (isDoubleTap) {
-      this.lastTapAt = 0;
-      this.startAttack(world.x, world.y);
-    } else {
-      this.lastTapAt = now;
-      this.lastTapScreenX = pointer.x;
-      this.lastTapScreenY = pointer.y;
-      this.moveTarget = { x: world.x, y: world.y };
+  /** Called every frame by the React virtual-joystick overlay. x/y in [-1, 1]. */
+  setMoveInput(x: number, y: number) {
+    const len = Math.hypot(x, y);
+    if (len > 1) {
+      x /= len;
+      y /= len;
     }
+    this.joystickDir = { x, y };
+    if (len > 0.05) this.aimDir = { x, y };
   }
 
-  private startAttack(worldX: number, worldY: number) {
+  /** Called by the React fire button. Fires in the current aim direction. */
+  fireBullet() {
     if (!this.selfContainer) return;
-    const dx = worldX - this.selfContainer.x;
-    const dy = worldY - this.selfContainer.y;
-    const len = Math.hypot(dx, dy) || 1;
-    this.attackDir = { x: dx / len, y: dy / len };
-    this.attackUntil = Date.now() + ATTACK.DURATION_MS;
-    this.moveTarget = null;
-    this.spawnAttackFlash(this.selfContainer.x, this.selfContainer.y, dx / len, dy / len);
-    playAttack();
+    const now = Date.now();
+    if (now < this.nextShotAllowedAt) return;
+    if (this.room.state.players.get(this.sessionId)?.state !== "alive") return;
+    this.nextShotAllowedAt = now + BULLET.COOLDOWN_MS;
+
+    this.room.send(MSG.SHOOT, { dirX: this.aimDir.x, dirY: this.aimDir.y });
+    this.spawnMuzzleFlash(this.selfContainer.x, this.selfContainer.y, this.aimDir.x, this.aimDir.y);
+    playShoot();
   }
 
-  private spawnAttackFlash(x: number, y: number, dirX: number, dirY: number) {
-    const tipX = x + dirX * 40;
-    const tipY = y + dirY * 40;
-    const flash = this.add.circle(tipX, tipY, 10, 0xffe066, 0.9);
+  private spawnMuzzleFlash(x: number, y: number, dirX: number, dirY: number) {
+    const tipX = x + dirX * 30;
+    const tipY = y + dirY * 30;
+    const flash = this.add.circle(tipX, tipY, 6, 0xffe066, 0.9);
     this.tweens.add({
       targets: flash,
-      scale: { from: 0.6, to: 1.8 },
+      scale: { from: 0.6, to: 1.6 },
       alpha: 0,
-      duration: 220,
+      duration: 140,
       ease: "Cubic.easeOut",
       onComplete: () => flash.destroy(),
     });
@@ -531,22 +541,7 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   private getInputDirection(): { x: number; y: number } {
-    if (Date.now() < this.attackUntil) {
-      return this.attackDir;
-    }
-    if (!this.moveTarget || !this.selfContainer) return { x: 0, y: 0 };
-    const dx = this.moveTarget.x - this.selfContainer.x;
-    const dy = this.moveTarget.y - this.selfContainer.y;
-    const len = Math.hypot(dx, dy);
-    if (len <= ArenaScene.MOVE_ARRIVE_DIST) {
-      this.moveTarget = null;
-      return { x: 0, y: 0 };
-    }
-    return { x: dx / len, y: dy / len };
-  }
-
-  private isAttacking(): boolean {
-    return Date.now() < this.attackUntil;
+    return this.joystickDir;
   }
 
   private sendPing() {
@@ -567,11 +562,10 @@ export class ArenaScene extends Phaser.Scene {
       const dir = this.getInputDirection();
       const now = Date.now();
 
-      const attacking = this.isAttacking();
       const sendInterval = 1000 / SIM.TICK_RATE;
       if (now - this.lastSentAt >= sendInterval) {
         this.lastSentAt = now;
-        const input: PendingInput = { seq: ++this.inputSeq, dirX: dir.x, dirY: dir.y, boost: attacking, timestamp: now };
+        const input: PendingInput = { seq: ++this.inputSeq, dirX: dir.x, dirY: dir.y, timestamp: now };
         this.room.send(MSG.INPUT, input);
         this.pendingInputs.push(input);
         if (this.pendingInputs.length > 60) this.pendingInputs.shift();
@@ -584,8 +578,7 @@ export class ArenaScene extends Phaser.Scene {
             dir.x,
             dir.y,
             player.mass,
-            sendInterval / 1000,
-            attacking ? ATTACK.SPEED_MULT : 1
+            sendInterval / 1000
           );
           this.selfContainer.setPosition(next.x, next.y);
           const radius = massToRadius(player.mass);
@@ -633,6 +626,11 @@ export class ArenaScene extends Phaser.Scene {
       zv.container.y = Phaser.Math.Linear(zv.container.y, zv.targetY, lerpFactor);
     }
 
+    for (const bv of this.bulletVisuals.values()) {
+      bv.gfx.x = Phaser.Math.Linear(bv.gfx.x, bv.targetX, lerpFactor);
+      bv.gfx.y = Phaser.Math.Linear(bv.gfx.y, bv.targetY, lerpFactor);
+    }
+
     this.emitMinimap();
   }
 
@@ -649,7 +647,7 @@ export class ArenaScene extends Phaser.Scene {
     let y = serverY;
     const dt = 1 / SIM.TICK_RATE;
     for (const input of this.pendingInputs) {
-      const next = stepPosition(x, y, input.dirX, input.dirY, mass, dt, input.boost ? ATTACK.SPEED_MULT : 1);
+      const next = stepPosition(x, y, input.dirX, input.dirY, mass, dt);
       x = next.x;
       y = next.y;
     }

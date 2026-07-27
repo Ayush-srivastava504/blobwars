@@ -12,8 +12,12 @@ export interface InputMessage {
   seq: number;
   dirX: number;
   dirY: number;
-  boost: boolean;
   timestamp: number;
+}
+
+export interface ShootMessage {
+  dirX: number;
+  dirY: number;
 }
 
 export type PlayerState = "alive" | "dead" | "respawning";
@@ -67,6 +71,7 @@ export interface RoomMetadata {
 
 export const MSG = {
   INPUT: "input",
+  SHOOT: "shoot",
   RESPAWN: "respawn",
   PONG: "pong",
   PING: "ping",

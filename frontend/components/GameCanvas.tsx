@@ -1,8 +1,10 @@
 // Root game component: mounts the Phaser canvas and overlays React HUD.
 // Bridges Phaser callbacks (self state, scoreboard, ping/fps, kill feed,
-// wave/coins, death events) into React state. Movement/attack input is
-// tap-to-move + double-tap handled entirely inside the Phaser scene;
-// this component only forwards mute toggling back into the SFX module.
+// wave/coins, death events) into React state. Movement comes from the
+// VirtualJoystick overlay (forwarded to the scene's setMoveInput) and
+// firing from the FireButton overlay (forwarded to the scene's
+// fireBullet); this component also forwards mute toggling to the SFX
+// module.
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -13,6 +15,8 @@ import { Scoreboard } from "./Scoreboard";
 import { Minimap, MinimapData } from "./Minimap";
 import { PerfIndicators } from "./PerfIndicators";
 import { KillFeed, DeathOverlay } from "./KillFeedAndDeath";
+import { VirtualJoystick } from "./VirtualJoystick";
+import { FireButton } from "./FireButton";
 import { setSfxMuted } from "../lib/sfx";
 
 export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void }) {
@@ -100,6 +104,14 @@ export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void })
     return () => clearTimeout(t);
   }, [killFeed]);
 
+  function handleMove(x: number, y: number) {
+    sceneRef.current?.setMoveInput?.(x, y);
+  }
+
+  function handleFire() {
+    sceneRef.current?.fireBullet?.();
+  }
+
   function toggleMute() {
     setMuted((prev) => {
       const next = !prev;
@@ -131,6 +143,9 @@ export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void })
       <Minimap data={minimap} />
       <PerfIndicators ping={ping} fps={fps} waveInfo={waveInfo} />
       <KillFeed messages={killFeed} />
+
+      <VirtualJoystick onChange={handleMove} />
+      <FireButton onFire={handleFire} />
 
       <button
         onClick={handleExit}

@@ -35,6 +35,15 @@ export class ZombieSchema extends Schema {
   @type("number") wave: number = 1;
 }
 
+export class BulletSchema extends Schema {
+  @type("string") id: string = "";
+  @type("string") ownerId: string = "";
+  @type("number") x: number = 0;
+  @type("number") y: number = 0;
+  @type("number") dirX: number = 0;
+  @type("number") dirY: number = 0;
+}
+
 export class FoodSchema extends Schema {
   @type("string") id: string = "";
   @type("number") x: number = 0;
@@ -55,6 +64,7 @@ export class ArenaState extends Schema {
   @type({ map: FoodSchema }) food = new MapSchema<FoodSchema>();
   @type({ map: ObstacleSchema }) obstacles = new MapSchema<ObstacleSchema>();
   @type({ map: ZombieSchema }) zombies = new MapSchema<ZombieSchema>();
+  @type({ map: BulletSchema }) bullets = new MapSchema<BulletSchema>();
   @type("number") serverTime: number = 0;
   @type("number") wave: number = 0;
   @type("string") waveState: "intermission" | "active" = "intermission";
