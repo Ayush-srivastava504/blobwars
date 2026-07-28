@@ -12,7 +12,7 @@ export interface MinimapData {
   others: { x: number; y: number; color: number }[];
 }
 
-export function Minimap({ data }: { data: MinimapData | null }) {
+export function Minimap({ data, raised }: { data: MinimapData | null; raised?: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const SIZE = 150;
 
@@ -53,7 +53,9 @@ export function Minimap({ data }: { data: MinimapData | null }) {
       ref={canvasRef}
       width={SIZE}
       height={SIZE}
-      className="absolute z-0 bottom-32 right-4 rounded-lg border border-white/10 pointer-events-none"
+      className={`absolute z-0 right-4 rounded-lg border border-white/10 pointer-events-none transition-[bottom] duration-150 ${
+        raised ? "bottom-48" : "bottom-32"
+      }`}
     />
   );
 }

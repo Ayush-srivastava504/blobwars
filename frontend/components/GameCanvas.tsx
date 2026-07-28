@@ -1,11 +1,14 @@
 // Root game component: mounts the Phaser canvas and overlays React HUD.
 // Bridges Phaser callbacks (self state, scoreboard, ping/fps, kill feed,
 // wave/coins, death events) into React state. On desktop, movement/aim/fire
-// are WASD + mouse + spacebar/click, handled entirely inside ArenaScene. On
-// touch devices we additionally render an on-screen joystick + fire button
-// (VirtualControls) on top of the canvas; it drives the character through
-// the small public API ArenaScene exposes (setVirtualMove/clearVirtualMove/
-// virtualFire/setVirtualFireHeld), fed via sceneRef below.
+// are WASD + mouse + spacebar/click, handled entirely inside ArenaScene.
+// The on-screen joystick + fire button (VirtualControls) is always rendered
+// on top of the canvas — not gated behind touch-device detection, since
+// that detection was unreliable across devices/browsers and meant the
+// controls sometimes silently never appeared. It drives the character
+// through the small public API ArenaScene exposes (setVirtualMove/
+// clearVirtualMove/virtualFire/setVirtualFireHeld), fed via sceneRef below.
+// Mouse works on it too, so it doubles as a way to test it on desktop.
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -18,11 +21,6 @@ import { PerfIndicators } from "./PerfIndicators";
 import { KillFeed, DeathOverlay } from "./KillFeedAndDeath";
 import { VirtualControls } from "./VirtualControls";
 import { setSfxMuted } from "../lib/sfx";
-
-function isTouchDevice() {
-  if (typeof window === "undefined") return false;
-  return window.matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 0;
-}
 
 export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -50,7 +48,6 @@ export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void })
   const [waveInfo, setWaveInfo] = useState<{ wave: number; waveState: string; waveEndsOrStartsAt: number } | null>(
     null
   );
-  const [showTouchControls] = useState(isTouchDevice);
   const killFeedId = useRef(0);
 
   useEffect(() => {
@@ -136,20 +133,19 @@ export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void })
         mass={self.mass}
         score={self.score}
         coins={self.coins}
+        raised
       />
       <Scoreboard entries={scoreboard} selfId={room.sessionId} />
-      <Minimap data={minimap} />
+      <Minimap data={minimap} raised />
       <PerfIndicators ping={ping} fps={fps} waveInfo={waveInfo} />
       <KillFeed messages={killFeed} />
 
-      {showTouchControls && (
-        <VirtualControls
-          onMove={(dir) => sceneRef.current?.setVirtualMove(dir)}
-          onMoveEnd={() => sceneRef.current?.clearVirtualMove()}
-          onFire={() => sceneRef.current?.virtualFire()}
-          onFireHeld={(held) => sceneRef.current?.setVirtualFireHeld(held)}
-        />
-      )}
+      <VirtualControls
+        onMove={(dir) => sceneRef.current?.setVirtualMove(dir)}
+        onMoveEnd={() => sceneRef.current?.clearVirtualMove()}
+        onFire={() => sceneRef.current?.virtualFire()}
+        onFireHeld={(held) => sceneRef.current?.setVirtualFireHeld(held)}
+      />
 
       <button
         onClick={handleExit}

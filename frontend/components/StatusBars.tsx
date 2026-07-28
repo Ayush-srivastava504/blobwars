@@ -13,6 +13,7 @@ export function StatusBars({
   mass,
   score,
   coins,
+  raised,
 }: {
   health: number;
   maxHealth: number;
@@ -22,12 +23,17 @@ export function StatusBars({
   mass: number;
   score: number;
   coins: number;
+  raised?: boolean;
 }) {
   const healthPct = Math.max(0, Math.min(100, (health / maxHealth) * 100));
   const xpPct = Math.max(0, Math.min(100, (xp / xpNeeded) * 100));
 
   return (
-    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-[320px] select-none pointer-events-none">
+    <div
+      className={`absolute left-1/2 -translate-x-1/2 w-[320px] select-none pointer-events-none transition-[bottom] duration-150 ${
+        raised ? "bottom-40" : "bottom-4"
+      }`}
+    >
       <div className="flex justify-between text-xs mb-1 text-white/80">
         <span>Lv.{level}</span>
         <span>Mass {Math.round(mass)}</span>
