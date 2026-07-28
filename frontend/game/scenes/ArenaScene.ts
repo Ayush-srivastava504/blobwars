@@ -23,7 +23,6 @@ interface RemoteVisual {
   container: Phaser.GameObjects.Container;
   shadow: Phaser.GameObjects.Ellipse;
   sprite: Phaser.GameObjects.Sprite;
-  gun: Phaser.GameObjects.Image;
   nameText: Phaser.GameObjects.Text;
   healthBarBg: Phaser.GameObjects.Rectangle;
   healthBarFill: Phaser.GameObjects.Rectangle;
@@ -62,9 +61,6 @@ const HERO_DISPLAY_W = Math.round((HERO_FRAME_W / HERO_FRAME_H) * HERO_DISPLAY_H
 const ZOMBIE_FRAME_SIZE = 96;
 const ZOMBIE_DISPLAY_SIZE = 56;
 
-const GUN_DISPLAY_W = 30;
-const GUN_DISPLAY_H = 20;
-
 export interface GameUICallbacks {
   onSelfUpdate: (data: {
     health: number;
@@ -102,7 +98,6 @@ export class ArenaScene extends Phaser.Scene {
 
   private selfShadow?: Phaser.GameObjects.Ellipse;
   private selfSprite?: Phaser.GameObjects.Sprite;
-  private selfGun?: Phaser.GameObjects.Image;
   private selfContainer?: Phaser.GameObjects.Container;
   private selfWasAlive = true;
   private selfLevel = 1;
@@ -154,7 +149,6 @@ export class ArenaScene extends Phaser.Scene {
       const n = String(i).padStart(2, "0");
       this.load.image(`hero-walk-${n}`, `/assets/hero/hero-walk-${n}.png`);
     }
-    this.load.image("pistol", "/assets/weapons/pistol.png");
     this.load.spritesheet("zombie-idle", "/assets/zombie/zombie-idle.png", {
       frameWidth: ZOMBIE_FRAME_SIZE,
       frameHeight: ZOMBIE_FRAME_SIZE,
@@ -425,10 +419,7 @@ export class ArenaScene extends Phaser.Scene {
     this.selfSprite.on(Phaser.Animations.Events.ANIMATION_UPDATE, () => {
       this.selfSprite?.setDisplaySize(HERO_DISPLAY_W, HERO_DISPLAY_H);
     });
-    this.selfGun = this.add
-      .image(HERO_DISPLAY_W * 0.3, -HERO_DISPLAY_H * 0.15, "pistol")
-      .setDisplaySize(GUN_DISPLAY_W, GUN_DISPLAY_H);
-    this.selfContainer = this.add.container(x, y, [this.selfShadow, this.selfSprite, this.selfGun]);
+    this.selfContainer = this.add.container(x, y, [this.selfShadow, this.selfSprite]);
     this.cameras.main.startFollow(this.selfContainer, true, 0.12, 0.12);
   }
 
@@ -453,22 +444,18 @@ export class ArenaScene extends Phaser.Scene {
     sprite.on(Phaser.Animations.Events.ANIMATION_UPDATE, () => {
       sprite.setDisplaySize(HERO_DISPLAY_W, HERO_DISPLAY_H);
     });
-    const gun = this.add
-      .image(HERO_DISPLAY_W * 0.3, -HERO_DISPLAY_H * 0.15, "pistol")
-      .setDisplaySize(GUN_DISPLAY_W, GUN_DISPLAY_H);
     const nameText = this.add
       .text(0, -HERO_DISPLAY_H - 10, name, { fontSize: "13px", color: "#ffffff", fontFamily: "Rubik, sans-serif" })
       .setOrigin(0.5);
     const healthBarBg = this.add.rectangle(0, -HERO_DISPLAY_H, 40, 5, 0x000000, 0.5);
     const healthBarFill = this.add.rectangle(-20, -HERO_DISPLAY_H, 40, 5, 0x2ecc71, 1).setOrigin(0, 0.5);
 
-    const container = this.add.container(x, y, [shadow, sprite, gun, healthBarBg, healthBarFill, nameText]);
+    const container = this.add.container(x, y, [shadow, sprite, healthBarBg, healthBarFill, nameText]);
     container.setAlpha(alive ? 1 : 0.15);
     this.remotePlayers.set(sessionId, {
       container,
       shadow,
       sprite,
-      gun,
       nameText,
       healthBarBg,
       healthBarFill,
@@ -640,12 +627,6 @@ export class ArenaScene extends Phaser.Scene {
       if (isMoving) {
         this.selfFacing = dir.x < 0 ? -1 : 1;
         this.selfSprite?.setFlipX(this.selfFacing < 0);
-        const angle = Math.atan2(dir.y, dir.x);
-        const gunAngle = this.selfFacing < 0 ? Math.PI - angle : angle;
-        this.selfGun
-          ?.setFlipX(this.selfFacing < 0)
-          .setPosition(HERO_DISPLAY_W * 0.3 * this.selfFacing, -HERO_DISPLAY_H * 0.15)
-          .setRotation(gunAngle);
         this.selfSprite?.play("hero-walk", true);
       } else {
         this.selfSprite?.stop();
@@ -670,13 +651,7 @@ export class ArenaScene extends Phaser.Scene {
       const dy = rv.targetY - rv.container.y;
       if (Math.hypot(dx, dy) > 0.5) {
         const facing = dx < 0 ? -1 : 1;
-        const angle = Math.atan2(dy, dx);
-        const gunAngle = facing < 0 ? Math.PI - angle : angle;
         rv.sprite.setFlipX(facing < 0);
-        rv.gun
-          .setFlipX(facing < 0)
-          .setPosition(HERO_DISPLAY_W * 0.3 * facing, -HERO_DISPLAY_H * 0.15)
-          .setRotation(gunAngle);
       }
       rv.container.x = Phaser.Math.Linear(rv.container.x, rv.targetX, lerpFactor);
       rv.container.y = Phaser.Math.Linear(rv.container.y, rv.targetY, lerpFactor);
