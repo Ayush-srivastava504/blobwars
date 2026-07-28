@@ -1,9 +1,12 @@
 // Main Phaser scene: renders the arena, players, food, and obstacles
 // from Colyseus room state, and sends local input back to the server.
 // Handles client-side prediction/reconciliation, remote interpolation,
-// shadows/animations/particles/SFX polish. Movement comes from a
-// virtual joystick (setMoveInput) and firing from a button (fireBullet);
-// both are driven by React overlay components in GameCanvas.
+// shadows/animations/particles/SFX polish.
+// Input: on desktop, WASD/arrows move, the mouse aims, spacebar/held-click
+// fires. On touch devices, tapping/dragging anywhere on the canvas sets a
+// run direction (the character keeps running that way until the next tap)
+// and each tap also fires a shot toward it. All input handling lives here;
+// there's no separate on-screen joystick/fire button overlay.
 import * as Phaser from "phaser";
 import { Room, getStateCallbacks } from "colyseus.js";
 import {
@@ -112,8 +115,9 @@ export class ArenaScene extends Phaser.Scene {
   private fpsAccum = 0;
   private fpsFrames = 0;
 
-  // Set every frame by the React virtual-joystick overlay via setMoveInput().
-  private joystickDir = { x: 0, y: 0 };
+  // Touch: set by tapping/dragging on the canvas, and kept (not reset) until
+  // the next tap changes it, so the character keeps running that direction.
+  private autoRunDir = { x: 0, y: 0 };
   // Desktop controls: WASD/arrow keys for movement, mouse position for aim,
   // spacebar or left-click (held) to fire. Fully independent of the touch
   // joystick/fire button so desktop play never depends on pointer-capture
@@ -161,20 +165,29 @@ export class ArenaScene extends Phaser.Scene {
     this.drawGrid();
     this.createAnimations();
 
-    // Desktop controls: WASD + arrow keys move, mouse position aims,
-    // spacebar or a held left-click fires. This is a separate input path
-    // from the touch joystick/fire button below, so desktop play works
-    // even if anything about the touch controls is misbehaving.
+    // Desktop: WASD/arrows move, mouse position aims, spacebar or a held
+    // left-click fires (see update()). Touch: dragging/tapping anywhere on
+    // the canvas sets the run direction (kept until the next touch) and
+    // aim, and each tap also fires immediately.
     if (this.input.keyboard) {
       this.keys = this.input.keyboard.addKeys("W,A,S,D,UP,LEFT,DOWN,RIGHT,SPACE") as any;
     }
-    this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
+    const updateAimFromPointer = (pointer: Phaser.Input.Pointer) => {
       if (!this.selfContainer) return;
       const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
       const dx = worldPoint.x - this.selfContainer.x;
       const dy = worldPoint.y - this.selfContainer.y;
       const len = Math.hypot(dx, dy);
-      if (len > 1) this.aimDir = { x: dx / len, y: dy / len };
+      if (len > 1) {
+        const dir = { x: dx / len, y: dy / len };
+        this.aimDir = dir;
+        if (pointer.pointerType === "touch") this.autoRunDir = dir;
+      }
+    };
+    this.input.on("pointermove", updateAimFromPointer);
+    this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      updateAimFromPointer(pointer);
+      if (pointer.pointerType === "touch") this.fireBullet();
     });
 
     const $ = getStateCallbacks(this.room);
@@ -328,18 +341,7 @@ export class ArenaScene extends Phaser.Scene {
     emitWave();
   }
 
-  /** Called every frame by the React virtual-joystick overlay. x/y in [-1, 1]. */
-  setMoveInput(x: number, y: number) {
-    const len = Math.hypot(x, y);
-    if (len > 1) {
-      x /= len;
-      y /= len;
-    }
-    this.joystickDir = { x, y };
-    if (len > 0.05) this.aimDir = { x, y };
-  }
-
-  /** Called by the React fire button. Fires in the current aim direction. */
+  /** Called on tap/click/spacebar (see create()/update()). Fires in the current aim direction. */
   fireBullet() {
     if (!this.selfContainer) return;
     const now = Date.now();
@@ -584,7 +586,7 @@ export class ArenaScene extends Phaser.Scene {
         return { x: x / len, y: y / len };
       }
     }
-    return this.joystickDir;
+    return this.autoRunDir;
   }
 
   private sendPing() {
