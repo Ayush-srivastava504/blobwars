@@ -92,7 +92,7 @@ export function VirtualControls({
   }, [onFireHeld]);
 
   return (
-    <div className="pointer-events-none absolute inset-0 select-none [touch-action:none]">
+    <div className="pointer-events-none absolute inset-0 z-20 select-none [touch-action:none]">
       {/* Joystick */}
       <div
         ref={baseRef}

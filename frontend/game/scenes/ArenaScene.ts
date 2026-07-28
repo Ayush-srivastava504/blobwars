@@ -149,6 +149,11 @@ export class ArenaScene extends Phaser.Scene {
   // input method already in this file.
   private virtualMoveDir = { x: 0, y: 0 };
   private virtualFireHeld = false;
+  // True whenever the on-screen joystick is actively being pushed. Used to
+  // suppress the canvas-wide tap-to-run/fire handler below, so a touch that
+  // lands on (or leaks through from) the joystick can never also register
+  // as a canvas tap and fire a bullet / redirect run-direction.
+  private virtualControlActive = false;
 
   constructor() {
     super("ArenaScene");
@@ -204,6 +209,10 @@ export class ArenaScene extends Phaser.Scene {
       updateAimFromPointer(pointer, pointer.isDown);
     });
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      // Ignore canvas taps while the on-screen joystick/fire button is in
+      // use, so touching the joystick can never also register as a
+      // canvas tap-to-fire/tap-to-run.
+      if (this.virtualControlActive || this.virtualFireHeld) return;
       updateAimFromPointer(pointer, true);
       this.fireBullet();
     });
@@ -620,6 +629,7 @@ export class ArenaScene extends Phaser.Scene {
   /** Called continuously while the joystick knob is dragged. dir should be a unit vector (or {0,0}). */
   setVirtualMove(dir: { x: number; y: number }) {
     this.virtualMoveDir = dir;
+    this.virtualControlActive = true;
     if (dir.x !== 0 || dir.y !== 0) {
       this.aimDir = dir;
       this.autoRunDir = dir;
@@ -629,6 +639,7 @@ export class ArenaScene extends Phaser.Scene {
   /** Called when the joystick knob is released. */
   clearVirtualMove() {
     this.virtualMoveDir = { x: 0, y: 0 };
+    this.virtualControlActive = false;
   }
 
   /** Called once per tap of the on-screen fire button; also supports held-to-fire via setVirtualFireHeld. */
