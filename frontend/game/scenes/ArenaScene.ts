@@ -109,7 +109,6 @@ export class ArenaScene extends Phaser.Scene {
   private selfShadow?: Phaser.GameObjects.Ellipse;
   private selfSprite?: Phaser.GameObjects.Sprite;
   private selfContainer?: Phaser.GameObjects.Container;
-  private debugText!: Phaser.GameObjects.Text;
   private selfWasAlive = true;
   private selfLevel = 1;
   private selfHealth = 100;
@@ -192,14 +191,6 @@ export class ArenaScene extends Phaser.Scene {
     this.physics.world.setBounds(0, 0, WORLD.WIDTH, WORLD.HEIGHT);
     this.drawGrid();
     this.createAnimations();
-    this.debugText = this.add.text(10, 120, "", {
-      fontSize: "14px",
-      color: "#00ff00",
-      backgroundColor: "#000000aa",
-      padding: { x: 8, y: 4 },
-    })
-      .setScrollFactor(0)
-      .setDepth(9999);
 
     // Movement/aim/fire, unified across mouse and touch:
     // - Moving the pointer while NOT pressed just aims (desktop mouse-look).
@@ -649,7 +640,6 @@ export class ArenaScene extends Phaser.Scene {
 
   /** Called continuously while the joystick knob is dragged. dir should be a unit vector (or {0,0}). */
   setVirtualMove(dir: { x: number; y: number }) {
-    console.log("Scene received", dir);
     this.virtualMoveDir = dir;
     this.virtualControlActive = true;
     // Only update aim here, NOT autoRunDir. getInputDirection() already gives
@@ -666,7 +656,6 @@ export class ArenaScene extends Phaser.Scene {
 
   /** Called when the joystick knob is released. */
   clearVirtualMove() {
-    console.log("Joystick released");
     this.virtualMoveDir = { x: 0, y: 0 };
     this.virtualControlActive = false;
   }
@@ -707,15 +696,6 @@ export class ArenaScene extends Phaser.Scene {
 
     if (this.selfContainer && selfPlayer?.state === "alive") {
       const dir = this.getInputDirection();
-      this.debugText.setText([
-        `Virtual : ${this.virtualMoveDir.x.toFixed(2)}, ${this.virtualMoveDir.y.toFixed(2)}`,
-        `Auto    : ${this.autoRunDir.x.toFixed(2)}, ${this.autoRunDir.y.toFixed(2)}`,
-        `Input   : ${dir.x.toFixed(2)}, ${dir.y.toFixed(2)}`,
-        `Aim     : ${this.aimDir.x.toFixed(2)}, ${this.aimDir.y.toFixed(2)}`,
-        `Moving  : ${dir.x !== 0 || dir.y !== 0}`,
-        `Anim    : ${this.selfSprite?.anims.currentAnim?.key ?? "none"}`,
-        `Pointer : ${this.virtualControlActive}`,
-      ]);
 
       // Predict + animate on EVERY rendered frame (using the real frame delta)
       // so movement and the walk animation stay smooth at full framerate,
@@ -725,7 +705,6 @@ export class ArenaScene extends Phaser.Scene {
       const dtSeconds = delta / 1000;
       const next = stepPosition(this.selfContainer.x, this.selfContainer.y, dir.x, dir.y, selfPlayer.mass, dtSeconds);
       this.selfContainer.setPosition(next.x, next.y);
-      console.log("CLIENT", next.x.toFixed(1), next.y.toFixed(1));
       const radius = massToRadius(selfPlayer.mass);
       this.selfShadow?.setSize(radius * 1.6, radius * 0.7).setY(radius * 0.55);
 
@@ -749,7 +728,6 @@ export class ArenaScene extends Phaser.Scene {
       if (now - this.lastSentAt >= sendInterval) {
         this.lastSentAt = now;
         const input: PendingInput = { seq: ++this.inputSeq, dirX: dir.x, dirY: dir.y, timestamp: now };
-        console.log("SEND", input.dirX, input.dirY);
         this.room.send(MSG.INPUT, input);
         this.pendingInputs.push(input);
         if (this.pendingInputs.length > 60) this.pendingInputs.shift();
@@ -788,12 +766,9 @@ export class ArenaScene extends Phaser.Scene {
   private reconcileSelf(serverX: number, serverY: number, mass: number, lastProcessedSeq: number, state: string) {
     if (!this.selfContainer) return;
     if (state !== "alive") {
-      console.log("SERVER", serverX.toFixed(1), serverY.toFixed(1));
       this.selfContainer.setPosition(serverX, serverY);
       return;
     }
-
-    console.log("SERVER", serverX.toFixed(1), serverY.toFixed(1));
 
     this.pendingInputs = this.pendingInputs.filter((i) => i.seq > lastProcessedSeq);
 

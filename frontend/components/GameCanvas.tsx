@@ -149,22 +149,10 @@ export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void })
       <KillFeed messages={killFeed} />
 
       <VirtualControls
-        onMove={(dir) => {
-          console.log("Canvas move", dir);
-          getArenaScene()?.setVirtualMove?.(dir);
-        }}
-        onMoveEnd={() => {
-          console.log("Canvas move end");
-          getArenaScene()?.clearVirtualMove?.();
-        }}
-        onFire={() => {
-          console.log("Canvas fire");
-          getArenaScene()?.virtualFire?.();
-        }}
-        onFireHeld={(held) => {
-          console.log("Canvas fire held", held);
-          getArenaScene()?.setVirtualFireHeld?.(held);
-        }}
+        onMove={(dir) => getArenaScene()?.setVirtualMove?.(dir)}
+        onMoveEnd={() => getArenaScene()?.clearVirtualMove?.()}
+        onFire={() => getArenaScene()?.virtualFire?.()}
+        onFireHeld={(held) => getArenaScene()?.setVirtualFireHeld?.(held)}
       />
 
       <button
