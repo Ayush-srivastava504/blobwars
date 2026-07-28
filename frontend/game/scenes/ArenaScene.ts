@@ -630,9 +630,15 @@ export class ArenaScene extends Phaser.Scene {
   setVirtualMove(dir: { x: number; y: number }) {
     this.virtualMoveDir = dir;
     this.virtualControlActive = true;
+    // Only update aim here, NOT autoRunDir. getInputDirection() already gives
+    // virtualMoveDir priority over autoRunDir, so mirroring the joystick
+    // direction into autoRunDir served no purpose for movement — but it did
+    // mean clearVirtualMove() (which only zeroes virtualMoveDir) left
+    // autoRunDir stuck at the last joystick direction, so releasing the
+    // stick never stopped the character: getInputDirection() would fall
+    // through to that stale autoRunDir and keep running forever.
     if (dir.x !== 0 || dir.y !== 0) {
       this.aimDir = dir;
-      this.autoRunDir = dir;
     }
   }
 
