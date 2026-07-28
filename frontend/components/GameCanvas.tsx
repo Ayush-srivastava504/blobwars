@@ -50,6 +50,14 @@ export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void })
   );
   const killFeedId = useRef(0);
 
+  const getArenaScene = () => {
+    const scene = sceneRef.current ?? gameRef.current?.scene.getScene("ArenaScene");
+    if (scene) {
+      sceneRef.current = scene;
+    }
+    return scene as any;
+  };
+
   useEffect(() => {
     let disposed = false;
 
@@ -141,10 +149,22 @@ export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void })
       <KillFeed messages={killFeed} />
 
       <VirtualControls
-        onMove={(dir) => sceneRef.current?.setVirtualMove(dir)}
-        onMoveEnd={() => sceneRef.current?.clearVirtualMove()}
-        onFire={() => sceneRef.current?.virtualFire()}
-        onFireHeld={(held) => sceneRef.current?.setVirtualFireHeld(held)}
+        onMove={(dir) => {
+          console.log("Canvas move", dir);
+          getArenaScene()?.setVirtualMove?.(dir);
+        }}
+        onMoveEnd={() => {
+          console.log("Canvas move end");
+          getArenaScene()?.clearVirtualMove?.();
+        }}
+        onFire={() => {
+          console.log("Canvas fire");
+          getArenaScene()?.virtualFire?.();
+        }}
+        onFireHeld={(held) => {
+          console.log("Canvas fire held", held);
+          getArenaScene()?.setVirtualFireHeld?.(held);
+        }}
       />
 
       <button
