@@ -165,14 +165,18 @@ export class ArenaScene extends Phaser.Scene {
     this.drawGrid();
     this.createAnimations();
 
-    // Desktop: WASD/arrows move, mouse position aims, spacebar or a held
-    // left-click fires (see update()). Touch: dragging/tapping anywhere on
-    // the canvas sets the run direction (kept until the next touch) and
-    // aim, and each tap also fires immediately.
+    // Movement/aim/fire, unified across mouse and touch:
+    // - Moving the pointer while NOT pressed just aims (desktop mouse-look).
+    // - Pressing (click or tap) sets the run direction toward that point
+    //   (character keeps running that way until the next press) and fires
+    //   immediately.
+    // - Dragging while pressed keeps steering the run direction.
+    // WASD/arrow keys, if held, override the run direction (see
+    // getInputDirection()).
     if (this.input.keyboard) {
       this.keys = this.input.keyboard.addKeys("W,A,S,D,UP,LEFT,DOWN,RIGHT,SPACE") as any;
     }
-    const updateAimFromPointer = (pointer: Phaser.Input.Pointer) => {
+    const updateAimFromPointer = (pointer: Phaser.Input.Pointer, alsoSetRunDirection: boolean) => {
       if (!this.selfContainer) return;
       const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
       const dx = worldPoint.x - this.selfContainer.x;
@@ -181,13 +185,15 @@ export class ArenaScene extends Phaser.Scene {
       if (len > 1) {
         const dir = { x: dx / len, y: dy / len };
         this.aimDir = dir;
-        if (pointer.pointerType === "touch") this.autoRunDir = dir;
+        if (alsoSetRunDirection) this.autoRunDir = dir;
       }
     };
-    this.input.on("pointermove", updateAimFromPointer);
+    this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
+      updateAimFromPointer(pointer, pointer.isDown);
+    });
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
-      updateAimFromPointer(pointer);
-      if (pointer.pointerType === "touch") this.fireBullet();
+      updateAimFromPointer(pointer, true);
+      this.fireBullet();
     });
 
     const $ = getStateCallbacks(this.room);
