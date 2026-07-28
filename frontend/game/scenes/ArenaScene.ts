@@ -712,10 +712,13 @@ export class ArenaScene extends Phaser.Scene {
       if (isMoving) {
         this.selfFacing = dir.x < 0 ? -1 : 1;
         this.selfSprite?.setFlipX(this.selfFacing < 0);
-        this.selfSprite?.play("hero-walk", true);
-      } else {
-        this.selfSprite?.play("hero-idle", true);
-      }
+        if (this.selfSprite?.anims.currentAnim?.key !== "hero-walk") {
+          this.selfSprite.play("hero-walk");
+        } else {
+          if (this.selfSprite?.anims.currentAnim?.key !== "hero-idle") {
+            this.selfSprite.play("hero-idle");
+          }
+        }
 
       // Network send stays on its own fixed cadence (SIM.TICK_RATE), fully
       // decoupled from rendering above, so server load/bandwidth is unaffected.
