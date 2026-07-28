@@ -47,16 +47,21 @@ export function VirtualControls({
     }
     setKnobOffset({ x: dx, y: dy });
 
+    const clampedDist = Math.min(dist, MAX_OFFSET);
+    const normalizedX = clampedDist > 0 ? dx / clampedDist : 0;
+    const normalizedY = clampedDist > 0 ? dy / clampedDist : 0;
+    console.log("MOVE", dx.toFixed(2), dy.toFixed(2), normalizedX.toFixed(2), normalizedY.toFixed(2));
+
     // Dead zone so tiny jitter near center doesn't send a phantom direction.
     if (dist < 8) {
       onMove({ x: 0, y: 0 });
       return;
     }
-    const clampedDist = Math.min(dist, MAX_OFFSET);
-    onMove({ x: dx / clampedDist, y: dy / clampedDist });
+    onMove({ x: normalizedX, y: normalizedY });
   }, [onMove]);
 
   const handleJoystickPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    console.log("JOYSTICK DOWN");
     e.preventDefault();
     (e.target as Element).setPointerCapture?.(e.pointerId);
     activePointerId.current = e.pointerId;
@@ -71,6 +76,7 @@ export function VirtualControls({
   }, [updateFromPointer]);
 
   const releaseJoystick = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    console.log("JOYSTICK UP");
     if (activePointerId.current !== e.pointerId) return;
     activePointerId.current = null;
     setDragging(false);
