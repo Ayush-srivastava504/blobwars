@@ -53,7 +53,7 @@ export function Minimap({ data }: { data: MinimapData | null }) {
       ref={canvasRef}
       width={SIZE}
       height={SIZE}
-      className="absolute bottom-4 right-4 rounded-lg border border-white/10 pointer-events-none"
+      className="absolute z-0 bottom-32 right-4 rounded-lg border border-white/10 pointer-events-none"
     />
   );
 }

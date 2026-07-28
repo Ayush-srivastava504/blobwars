@@ -30,7 +30,7 @@ export function FireButton({ onFire }: { onFire: () => void }) {
       onPointerUp={stop}
       onPointerCancel={stop}
       onPointerLeave={stop}
-      className="absolute bottom-10 right-8 w-20 h-20 rounded-full bg-arena-danger/80 border-2 border-white/30 backdrop-blur touch-none select-none flex items-center justify-center text-white font-bold text-sm active:scale-95 transition-transform"
+      className="absolute z-20 bottom-10 right-8 w-20 h-20 rounded-full bg-arena-danger/80 border-2 border-white/30 backdrop-blur touch-none select-none flex items-center justify-center text-white font-bold text-sm active:scale-95 transition-transform"
       aria-label="Fire"
     >
       FIRE
