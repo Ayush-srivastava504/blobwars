@@ -2,10 +2,10 @@
 // Bridges Phaser callbacks (self state, scoreboard, ping/fps, kill feed,
 // wave/coins, death events) into React state. On desktop, movement/aim/fire
 // are WASD + mouse + spacebar/click, handled entirely inside ArenaScene. On
-// touch devices, tapping/dragging anywhere on the game canvas itself sets
-// the run direction (character keeps running that way) and fires — also
-// handled entirely inside ArenaScene, so there's no separate on-screen
-// joystick/fire button UI to wire up here.
+// touch devices we additionally render an on-screen joystick + fire button
+// (VirtualControls) on top of the canvas; it drives the character through
+// the small public API ArenaScene exposes (setVirtualMove/clearVirtualMove/
+// virtualFire/setVirtualFireHeld), fed via sceneRef below.
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -16,7 +16,13 @@ import { Scoreboard } from "./Scoreboard";
 import { Minimap, MinimapData } from "./Minimap";
 import { PerfIndicators } from "./PerfIndicators";
 import { KillFeed, DeathOverlay } from "./KillFeedAndDeath";
+import { VirtualControls } from "./VirtualControls";
 import { setSfxMuted } from "../lib/sfx";
+
+function isTouchDevice() {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 0;
+}
 
 export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -44,6 +50,7 @@ export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void })
   const [waveInfo, setWaveInfo] = useState<{ wave: number; waveState: string; waveEndsOrStartsAt: number } | null>(
     null
   );
+  const [showTouchControls] = useState(isTouchDevice);
   const killFeedId = useRef(0);
 
   useEffect(() => {
@@ -134,6 +141,15 @@ export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void })
       <Minimap data={minimap} />
       <PerfIndicators ping={ping} fps={fps} waveInfo={waveInfo} />
       <KillFeed messages={killFeed} />
+
+      {showTouchControls && (
+        <VirtualControls
+          onMove={(dir) => sceneRef.current?.setVirtualMove(dir)}
+          onMoveEnd={() => sceneRef.current?.clearVirtualMove()}
+          onFire={() => sceneRef.current?.virtualFire()}
+          onFireHeld={(held) => sceneRef.current?.setVirtualFireHeld(held)}
+        />
+      )}
 
       <button
         onClick={handleExit}

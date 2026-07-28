@@ -5,8 +5,12 @@
 // Input: on desktop, WASD/arrows move, the mouse aims, spacebar/held-click
 // fires. On touch devices, tapping/dragging anywhere on the canvas sets a
 // run direction (the character keeps running that way until the next tap)
-// and each tap also fires a shot toward it. All input handling lives here;
-// there's no separate on-screen joystick/fire button overlay.
+// and each tap also fires a shot toward it. On top of that, GameCanvas
+// overlays an on-screen joystick + fire button (see VirtualControls.tsx)
+// that drives the character through the small public API at the bottom of
+// this class (setVirtualMove/clearVirtualMove/virtualFire/setVirtualFireHeld) —
+// all three input paths (keyboard, canvas tap/drag, HUD joystick) feed the
+// same getInputDirection()/fireBullet() so none of them can conflict.
 import * as Phaser from "phaser";
 import { Room, getStateCallbacks } from "colyseus.js";
 import {
@@ -137,6 +141,14 @@ export class ArenaScene extends Phaser.Scene {
   // taps fire without currently pushing the joystick.
   private aimDir = { x: 1, y: 0 };
   private nextShotAllowedAt = 0;
+
+  // On-screen virtual joystick (mobile HUD overlay in GameCanvas). Set via
+  // setVirtualMove() every time the stick is dragged, and cleared to {0,0}
+  // on release. Read by getInputDirection() with the same priority as the
+  // touch auto-run direction, so it "just works" alongside every other
+  // input method already in this file.
+  private virtualMoveDir = { x: 0, y: 0 };
+  private virtualFireHeld = false;
 
   constructor() {
     super("ArenaScene");
@@ -592,7 +604,41 @@ export class ArenaScene extends Phaser.Scene {
         return { x: x / len, y: y / len };
       }
     }
+    // On-screen joystick takes priority over the tap-to-run direction
+    // whenever it's actively being pushed (non-zero), since it means the
+    // player is actively steering with a thumb right now.
+    if (this.virtualMoveDir.x !== 0 || this.virtualMoveDir.y !== 0) {
+      return this.virtualMoveDir;
+    }
     return this.autoRunDir;
+  }
+
+  // ---- Public API for the on-screen joystick + fire button HUD (see
+  // GameCanvas/VirtualControls). Kept intentionally tiny and decoupled from
+  // desktop input so neither path can break the other. ----
+
+  /** Called continuously while the joystick knob is dragged. dir should be a unit vector (or {0,0}). */
+  setVirtualMove(dir: { x: number; y: number }) {
+    this.virtualMoveDir = dir;
+    if (dir.x !== 0 || dir.y !== 0) {
+      this.aimDir = dir;
+      this.autoRunDir = dir;
+    }
+  }
+
+  /** Called when the joystick knob is released. */
+  clearVirtualMove() {
+    this.virtualMoveDir = { x: 0, y: 0 };
+  }
+
+  /** Called once per tap of the on-screen fire button; also supports held-to-fire via setVirtualFireHeld. */
+  virtualFire() {
+    this.fireBullet();
+  }
+
+  /** Called on fire-button pointerdown/pointerup so holding it fires continuously, matching desktop spacebar behavior. */
+  setVirtualFireHeld(held: boolean) {
+    this.virtualFireHeld = held;
   }
 
   private sendPing() {
@@ -610,8 +656,10 @@ export class ArenaScene extends Phaser.Scene {
     if (!this.room?.state?.players) return;
 
     // Desktop: spacebar or a held left-click fires continuously (fireBullet's
-    // own cooldown gates the actual rate). Independent of the touch fire button.
-    if (this.keys?.SPACE.isDown || this.input.activePointer.leftButtonDown()) {
+    // own cooldown gates the actual rate). Mobile: holding the on-screen
+    // fire button does the same. All three share fireBullet()'s own
+    // cooldown, so none of them can out-fire the others.
+    if (this.keys?.SPACE.isDown || this.input.activePointer.leftButtonDown() || this.virtualFireHeld) {
       this.fireBullet();
     }
 
