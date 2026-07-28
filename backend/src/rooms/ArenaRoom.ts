@@ -53,9 +53,10 @@ export class ArenaRoom extends Room<ArenaState> {
     this.state.waveEndsOrStartsAt = Date.now() + WAVE.FIRST_WAVE_DELAY_MS;
 
     this.onMessage(MSG.INPUT, (client, message: InputMessage) => {
+      console.log("INPUT RECEIVED:", message);
       const queue = this.inputQueues.get(client.sessionId);
-      if (queue) {
-          if (queue.length < 12) queue.push(message);
+      if (queue && queue.length < 12) {
+        queue.push(message);
       }
     });
 

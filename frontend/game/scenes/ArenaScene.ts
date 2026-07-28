@@ -57,10 +57,13 @@ interface BulletVisual {
   targetY: number;
 }
 
-// Hero source frames are 110x239; display them at a fixed on-screen height
-// and derive width from the frame's aspect ratio so the art doesn't stretch.
-const HERO_FRAME_W = 110;
-const HERO_FRAME_H = 239;
+// Hero spritesheets are 1536x1024, laid out as a 4x4 grid of 384x256 frames.
+// (The old code pointed at individual hero-walk-01..06 PNGs that don't exist
+// in /public/assets/hero — only the 4 "character <action> spritesheet.png"
+// files are there, which is why the character never rendered: the sprite's
+// texture key resolved to nothing.)
+const HERO_FRAME_W = 384;
+const HERO_FRAME_H = 256;
 const HERO_DISPLAY_H = 72;
 const HERO_DISPLAY_W = Math.round((HERO_FRAME_W / HERO_FRAME_H) * HERO_DISPLAY_H);
 
@@ -166,13 +169,20 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   preload() {
-    for (let i = 1; i <= 6; i++) {
-      const n = String(i).padStart(2, "0");
-      this.load.image(`hero-walk-${n}`, `/assets/hero/hero-walk-${n}.png`);
-    }
+    this.load.spritesheet("hero-run", "/assets/hero/character run spritesheet.png", {
+      frameWidth: HERO_FRAME_W,
+      frameHeight: HERO_FRAME_H,
+    });
+    this.load.spritesheet("hero-idle", "/assets/hero/character idle spritesheet.png", {
+      frameWidth: HERO_FRAME_W,
+      frameHeight: HERO_FRAME_H,
+    });
     this.load.spritesheet("zombie-idle", "/assets/zombie/zombie-idle.png", {
       frameWidth: ZOMBIE_FRAME_SIZE,
       frameHeight: ZOMBIE_FRAME_SIZE,
+    });
+    this.load.on("loaderror", (file: { key: string; src: string }) => {
+      console.error("[ArenaScene] asset failed to load:", file.key, file.src);
     });
   }
 
@@ -411,15 +421,16 @@ export class ArenaScene extends Phaser.Scene {
     if (!this.anims.exists("hero-walk")) {
       this.anims.create({
         key: "hero-walk",
-        frames: [
-          { key: "hero-walk-01" },
-          { key: "hero-walk-02" },
-          { key: "hero-walk-03" },
-          { key: "hero-walk-04" },
-          { key: "hero-walk-05" },
-          { key: "hero-walk-06" },
-        ],
-        frameRate: 10,
+        frames: this.anims.generateFrameNumbers("hero-run", { start: 0, end: 15 }),
+        frameRate: 16,
+        repeat: -1,
+      });
+    }
+    if (!this.anims.exists("hero-idle")) {
+      this.anims.create({
+        key: "hero-idle",
+        frames: this.anims.generateFrameNumbers("hero-idle", { start: 0, end: 15 }),
+        frameRate: 8,
         repeat: -1,
       });
     }
@@ -437,9 +448,10 @@ export class ArenaScene extends Phaser.Scene {
     const radius = massToRadius(mass);
     this.selfShadow = this.add.ellipse(0, radius * 0.55, radius * 1.6, radius * 0.7, 0x000000, 0.25);
     this.selfSprite = this.add
-      .sprite(0, 0, "hero-walk-01")
+      .sprite(0, 0, "hero-idle", 0)
       .setDisplaySize(HERO_DISPLAY_W, HERO_DISPLAY_H)
-      .setOrigin(0.5, 0.8);
+      .setOrigin(0.5, 0.8)
+      .play("hero-idle");
     // The hero-walk source frames are each a different native size, so a
     // display size set once (above) gets thrown off every time the
     // animation switches frames — the sprite visibly grows/shrinks/warps
@@ -464,7 +476,7 @@ export class ArenaScene extends Phaser.Scene {
     const radius = massToRadius(mass);
     const shadow = this.add.ellipse(0, radius * 0.55, radius * 1.6, radius * 0.7, 0x000000, 0.25);
     const sprite = this.add
-      .sprite(0, 0, "hero-walk-01")
+      .sprite(0, 0, "hero-run", 0)
       .setDisplaySize(HERO_DISPLAY_W, HERO_DISPLAY_H)
       .setOrigin(0.5, 0.8)
       .play("hero-walk");
@@ -702,7 +714,7 @@ export class ArenaScene extends Phaser.Scene {
         this.selfSprite?.setFlipX(this.selfFacing < 0);
         this.selfSprite?.play("hero-walk", true);
       } else {
-        this.selfSprite?.stop();
+        this.selfSprite?.play("hero-idle", true);
       }
 
       // Network send stays on its own fixed cadence (SIM.TICK_RATE), fully
