@@ -119,6 +119,21 @@ export class ArenaScene extends Phaser.Scene {
 
   // Set every frame by the React virtual-joystick overlay via setMoveInput().
   private joystickDir = { x: 0, y: 0 };
+  // Desktop controls: WASD/arrow keys for movement, mouse position for aim,
+  // spacebar or left-click (held) to fire. Fully independent of the touch
+  // joystick/fire button so desktop play never depends on pointer-capture
+  // behavior at all.
+  private keys!: {
+    W: Phaser.Input.Keyboard.Key;
+    A: Phaser.Input.Keyboard.Key;
+    S: Phaser.Input.Keyboard.Key;
+    D: Phaser.Input.Keyboard.Key;
+    UP: Phaser.Input.Keyboard.Key;
+    LEFT: Phaser.Input.Keyboard.Key;
+    DOWN: Phaser.Input.Keyboard.Key;
+    RIGHT: Phaser.Input.Keyboard.Key;
+    SPACE: Phaser.Input.Keyboard.Key;
+  };
   // Last non-zero movement direction, used to aim bullets when the player
   // taps fire without currently pushing the joystick.
   private aimDir = { x: 1, y: 0 };
@@ -151,6 +166,22 @@ export class ArenaScene extends Phaser.Scene {
     this.physics.world.setBounds(0, 0, WORLD.WIDTH, WORLD.HEIGHT);
     this.drawGrid();
     this.createAnimations();
+
+    // Desktop controls: WASD + arrow keys move, mouse position aims,
+    // spacebar or a held left-click fires. This is a separate input path
+    // from the touch joystick/fire button below, so desktop play works
+    // even if anything about the touch controls is misbehaving.
+    if (this.input.keyboard) {
+      this.keys = this.input.keyboard.addKeys("W,A,S,D,UP,LEFT,DOWN,RIGHT,SPACE") as any;
+    }
+    this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
+      if (!this.selfContainer) return;
+      const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
+      const dx = worldPoint.x - this.selfContainer.x;
+      const dy = worldPoint.y - this.selfContainer.y;
+      const len = Math.hypot(dx, dy);
+      if (len > 1) this.aimDir = { x: dx / len, y: dy / len };
+    });
 
     const $ = getStateCallbacks(this.room);
 
@@ -554,6 +585,18 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   private getInputDirection(): { x: number; y: number } {
+    if (this.keys) {
+      let x = 0;
+      let y = 0;
+      if (this.keys.A.isDown || this.keys.LEFT.isDown) x -= 1;
+      if (this.keys.D.isDown || this.keys.RIGHT.isDown) x += 1;
+      if (this.keys.W.isDown || this.keys.UP.isDown) y -= 1;
+      if (this.keys.S.isDown || this.keys.DOWN.isDown) y += 1;
+      if (x !== 0 || y !== 0) {
+        const len = Math.hypot(x, y) || 1;
+        return { x: x / len, y: y / len };
+      }
+    }
     return this.joystickDir;
   }
 
@@ -570,6 +613,12 @@ export class ArenaScene extends Phaser.Scene {
     // before game.destroy() runs in the parent's React cleanup) or any other
     // moment where the schema doesn't yet (or no longer) have players synced.
     if (!this.room?.state?.players) return;
+
+    // Desktop: spacebar or a held left-click fires continuously (fireBullet's
+    // own cooldown gates the actual rate). Independent of the touch fire button.
+    if (this.keys?.SPACE.isDown || this.input.activePointer.leftButtonDown()) {
+      this.fireBullet();
+    }
 
     const selfPlayer = this.selfContainer ? this.room.state.players.get(this.sessionId) : undefined;
 
