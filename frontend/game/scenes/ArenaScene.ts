@@ -57,18 +57,23 @@ interface BulletVisual {
   targetY: number;
 }
 
-// Hero spritesheets are 1536x1024, laid out as a 4x4 grid of 384x256 frames.
-// (The old code pointed at individual hero-walk-01..06 PNGs that don't exist
-// in /public/assets/hero — only the 4 "character <action> spritesheet.png"
-// files are there, which is why the character never rendered: the sprite's
-// texture key resolved to nothing.)
-const HERO_FRAME_W = 384;
-const HERO_FRAME_H = 256;
+// The hero has no combined spritesheet — /public/assets/hero only has
+// individual numbered frame PNGs (Walk-hero01_001..008.png,
+// Idle-hero01_001..012.png), each a different native size. We load each
+// frame as its own texture and build the animation from a frame-key list
+// rather than generateFrameNumbers (which needs one shared sheet).
+const HERO_WALK_FRAME_COUNT = 8;
+const HERO_IDLE_FRAME_COUNT = 12;
+const heroWalkFrameKey = (i: number) => `hero-walk-${i}`;
+const heroIdleFrameKey = (i: number) => `hero-idle-${i}`;
 const HERO_DISPLAY_H = 72;
-const HERO_DISPLAY_W = Math.round((HERO_FRAME_W / HERO_FRAME_H) * HERO_DISPLAY_H);
+const HERO_DISPLAY_W = 108;
 
-// Zombie sheet is 8 frames of 96x96 laid out horizontally.
+// Zombie has no walk sheet — only Idle/Attack/Dead/Eating/Hurt/Jump exist
+// in /public/assets/zombie. Idle.png is 9 frames of 96x96 laid out
+// horizontally; we reuse it for the walk cycle.
 const ZOMBIE_FRAME_SIZE = 96;
+const ZOMBIE_IDLE_FRAME_COUNT = 9;
 const ZOMBIE_DISPLAY_SIZE = 56;
 
 export interface GameUICallbacks {
@@ -169,15 +174,13 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   preload() {
-    this.load.spritesheet("hero-run", "/assets/hero/character run spritesheet.png", {
-      frameWidth: HERO_FRAME_W,
-      frameHeight: HERO_FRAME_H,
-    });
-    this.load.spritesheet("hero-idle", "/assets/hero/character idle spritesheet.png", {
-      frameWidth: HERO_FRAME_W,
-      frameHeight: HERO_FRAME_H,
-    });
-    this.load.spritesheet("zombie-idle", "/assets/zombie/zombie-idle.png", {
+    for (let i = 0; i < HERO_WALK_FRAME_COUNT; i++) {
+      this.load.image(heroWalkFrameKey(i), `/assets/hero/Walk-hero01_${String(i + 1).padStart(3, "0")}.png`);
+    }
+    for (let i = 0; i < HERO_IDLE_FRAME_COUNT; i++) {
+      this.load.image(heroIdleFrameKey(i), `/assets/hero/Idle-hero01_${String(i + 1).padStart(3, "0")}.png`);
+    }
+    this.load.spritesheet("zombie-idle", "/assets/zombie/Idle.png", {
       frameWidth: ZOMBIE_FRAME_SIZE,
       frameHeight: ZOMBIE_FRAME_SIZE,
     });
@@ -421,15 +424,15 @@ export class ArenaScene extends Phaser.Scene {
     if (!this.anims.exists("hero-walk")) {
       this.anims.create({
         key: "hero-walk",
-        frames: this.anims.generateFrameNumbers("hero-run", { start: 0, end: 15 }),
-        frameRate: 16,
+        frames: Array.from({ length: HERO_WALK_FRAME_COUNT }, (_, i) => ({ key: heroWalkFrameKey(i) })),
+        frameRate: 12,
         repeat: -1,
       });
     }
     if (!this.anims.exists("hero-idle")) {
       this.anims.create({
         key: "hero-idle",
-        frames: this.anims.generateFrameNumbers("hero-idle", { start: 0, end: 15 }),
+        frames: Array.from({ length: HERO_IDLE_FRAME_COUNT }, (_, i) => ({ key: heroIdleFrameKey(i) })),
         frameRate: 8,
         repeat: -1,
       });
@@ -437,7 +440,7 @@ export class ArenaScene extends Phaser.Scene {
     if (!this.anims.exists("zombie-walk")) {
       this.anims.create({
         key: "zombie-walk",
-        frames: this.anims.generateFrameNumbers("zombie-idle", { start: 0, end: 7 }),
+        frames: this.anims.generateFrameNumbers("zombie-idle", { start: 0, end: ZOMBIE_IDLE_FRAME_COUNT - 1 }),
         frameRate: 8,
         repeat: -1,
       });
@@ -448,7 +451,7 @@ export class ArenaScene extends Phaser.Scene {
     const radius = massToRadius(mass);
     this.selfShadow = this.add.ellipse(0, radius * 0.55, radius * 1.6, radius * 0.7, 0x000000, 0.25);
     this.selfSprite = this.add
-      .sprite(0, 0, "hero-idle", 0)
+      .sprite(0, 0, heroIdleFrameKey(0))
       .setDisplaySize(HERO_DISPLAY_W, HERO_DISPLAY_H)
       .setOrigin(0.5, 0.8)
       .play("hero-idle");
@@ -476,7 +479,7 @@ export class ArenaScene extends Phaser.Scene {
     const radius = massToRadius(mass);
     const shadow = this.add.ellipse(0, radius * 0.55, radius * 1.6, radius * 0.7, 0x000000, 0.25);
     const sprite = this.add
-      .sprite(0, 0, "hero-run", 0)
+      .sprite(0, 0, heroWalkFrameKey(0))
       .setDisplaySize(HERO_DISPLAY_W, HERO_DISPLAY_H)
       .setOrigin(0.5, 0.8)
       .play("hero-walk");
