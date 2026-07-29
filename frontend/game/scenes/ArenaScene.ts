@@ -87,9 +87,18 @@ const ZOMBIE_IDLE_FRAMES = 9; // Idle.png = 864/96
 const ZOMBIE_DEAD_FRAMES = 5; // Dead.png = 480/96
 
 // Small hand-gun overlay drawn beside the hero, swapped by equipped weapon.
+// The body sprite is anchored at origin (0.5, 0.8) — i.e. local (0,0) sits
+// horizontally centered but 80% of the way DOWN the sprite, near the feet,
+// not at the top-left like a default Phaser image. GUN_OFFSET_Y was -8,
+// which is barely above that near-feet anchor, so the gun rendered down by
+// the character's ankles instead of at hand height. Hand height on a
+// HERO_DISPLAY_H-tall standing sprite is roughly 45% down from the top of
+// the head, i.e. (0.45 - 0.8) * HERO_DISPLAY_H above the sprite's local
+// origin — hence the offset below is derived from HERO_DISPLAY_H rather
+// than a hardcoded guess, so it stays correct if that constant changes.
 const GUN_DISPLAY_W = 22;
-const GUN_OFFSET_X = 16;
-const GUN_OFFSET_Y = -8;
+const GUN_OFFSET_X = 12;
+const GUN_OFFSET_Y = (0.45 - 0.8) * HERO_DISPLAY_H;
 function gunTextureKey(weaponId: string) {
   return `gun-${weaponId}`;
 }
@@ -728,7 +737,12 @@ export class ArenaScene extends Phaser.Scene {
       if (this.keys.S.isDown || this.keys.DOWN.isDown) y += 1;
       if (x !== 0 || y !== 0) {
         const len = Math.hypot(x, y) || 1;
-        return { x: x / len, y: y / len };
+        const dir = { x: x / len, y: y / len };
+        // Gun follows WASD the same way it already follows the joystick:
+        // moving updates the aim direction, so the gun points the way
+        // you're walking instead of staying wherever the mouse last aimed.
+        this.aimDir = dir;
+        return dir;
       }
     }
     // On-screen joystick (mobile HUD). No keyboard input and no joystick
@@ -806,7 +820,16 @@ export class ArenaScene extends Phaser.Scene {
     // own cooldown gates the actual rate). Mobile: holding the on-screen
     // fire button does the same. All three share fireBullet()'s own
     // cooldown, so none of them can out-fire the others.
-    if (this.keys?.SPACE.isDown || this.input.activePointer.leftButtonDown() || this.virtualFireHeld) {
+    // virtualControlActive is checked here as a second line of defense: the
+    // on-screen joystick's DOM pointer events now stop propagation (see
+    // VirtualControls.tsx) so Phaser's activePointer should never see them,
+    // but if a browser/OS still lets one leak through, this keeps the
+    // joystick from ever being able to trigger a shot on its own — only the
+    // dedicated Fire button (virtualFireHeld) can do that on mobile.
+    if (
+      !this.virtualControlActive &&
+      (this.keys?.SPACE.isDown || this.input.activePointer.leftButtonDown() || this.virtualFireHeld)
+    ) {
       this.fireBullet();
     }
     if (this.slideKey && Phaser.Input.Keyboard.JustDown(this.slideKey)) {

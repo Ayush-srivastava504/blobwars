@@ -62,8 +62,21 @@ export function VirtualControls({
     onMove({ x: normalizedX, y: normalizedY });
   }, [onMove]);
 
+  // IMPORTANT: every handler below calls e.stopPropagation() in addition to
+  // e.preventDefault(). These controls are plain HTML elements layered over
+  // the Phaser canvas, not part of it — but Phaser's input manager listens
+  // globally on `window` (so it can still catch a drag/release that leaves
+  // the canvas), so an un-stopped pointerdown on the joystick/fire button
+  // bubbles up to window and gets picked up by Phaser too. That made
+  // `this.input.activePointer.leftButtonDown()` read true while the
+  // joystick was merely being dragged, which the desktop "hold to fire"
+  // check in ArenaScene.update() interpreted as a held mouse button — i.e.
+  // the joystick appeared to fire on its own. Stopping propagation here
+  // keeps these HUD controls fully isolated from Phaser's input, so only
+  // the explicit onFire/onFireHeld calls below can ever trigger a shot.
   const handleJoystickPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
+    e.stopPropagation();
     (e.target as Element).setPointerCapture?.(e.pointerId);
     activePointerId.current = e.pointerId;
     setDragging(true);
@@ -73,11 +86,14 @@ export function VirtualControls({
   const handleJoystickPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (activePointerId.current !== e.pointerId) return;
     e.preventDefault();
+    e.stopPropagation();
     updateFromPointer(e.clientX, e.clientY);
   }, [updateFromPointer]);
 
   const releaseJoystick = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (activePointerId.current !== e.pointerId) return;
+    e.preventDefault();
+    e.stopPropagation();
     activePointerId.current = null;
     setDragging(false);
     setKnobOffset({ x: 0, y: 0 });
@@ -86,13 +102,16 @@ export function VirtualControls({
 
   const handleFireDown = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
     e.preventDefault();
+    e.stopPropagation();
     (e.target as Element).setPointerCapture?.(e.pointerId);
     setFiring(true);
     onFire();
     onFireHeld(true);
   }, [onFire, onFireHeld]);
 
-  const handleFireUp = useCallback(() => {
+  const handleFireUp = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
     setFiring(false);
     onFireHeld(false);
   }, [onFireHeld]);
@@ -100,6 +119,7 @@ export function VirtualControls({
   const handleSlideTap = useCallback(
     (e: React.PointerEvent<HTMLButtonElement>) => {
       e.preventDefault();
+      e.stopPropagation();
       onSlide();
       setSliding(true);
       window.setTimeout(() => setSliding(false), 180);
