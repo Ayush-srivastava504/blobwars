@@ -20,12 +20,18 @@ export function VirtualControls({
   onFire,
   onFireHeld,
   onSlide,
+  onBombAim,
+  onBombThrow,
+  bombCount = 0,
 }: {
   onMove: (dir: { x: number; y: number }) => void;
   onMoveEnd: () => void;
   onFire: () => void;
   onFireHeld: (held: boolean) => void;
   onSlide: () => void;
+  onBombAim?: (aiming: boolean) => void;
+  onBombThrow?: () => void;
+  bombCount?: number;
 }) {
   const baseRef = useRef<HTMLDivElement>(null);
   const activePointerId = useRef<number | null>(null);
@@ -33,6 +39,7 @@ export function VirtualControls({
   const [dragging, setDragging] = useState(false);
   const [firing, setFiring] = useState(false);
   const [sliding, setSliding] = useState(false);
+  const [aimingBomb, setAimingBomb] = useState(false);
 
   const updateFromPointer = useCallback((clientX: number, clientY: number) => {
     const base = baseRef.current;
@@ -127,6 +134,28 @@ export function VirtualControls({
     [onSlide]
   );
 
+  // Bomb: press-and-hold shows the dotted aim trajectory (see ArenaScene),
+  // releasing actually throws it. Same pointer-capture / stopPropagation
+  // pattern as Fire so it can't leak into Phaser's input.
+  const handleBombDown = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+    if (bombCount <= 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    setAimingBomb(true);
+    onBombAim?.(true);
+  }, [onBombAim, bombCount]);
+
+  const handleBombUp = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (aimingBomb) {
+      onBombThrow?.();
+    }
+    setAimingBomb(false);
+    onBombAim?.(false);
+  }, [onBombAim, onBombThrow, aimingBomb]);
+
   return (
     <div className="pointer-events-none absolute inset-0 z-20 select-none [touch-action:none]">
       {/* Joystick */}
@@ -183,6 +212,32 @@ export function VirtualControls({
         aria-label="Fire"
       >
         🔥
+      </button>
+
+      {/* Bomb button — hold to aim (shows dotted trajectory), release to throw. */}
+      <button
+        onPointerDown={handleBombDown}
+        onPointerUp={handleBombUp}
+        onPointerCancel={handleBombUp}
+        onPointerLeave={handleBombUp}
+        onContextMenu={(e) => e.preventDefault()}
+        disabled={bombCount <= 0}
+        className={`pointer-events-auto absolute bottom-32 right-12 w-14 h-14 rounded-full border-2 flex items-center justify-center text-xl font-bold [touch-action:none] transition-colors ${
+          bombCount <= 0
+            ? "bg-black/30 border-white/10 opacity-40"
+            : aimingBomb
+            ? "bg-orange-500 border-orange-300 scale-95"
+            : "bg-orange-600/70 border-white/20"
+        }`}
+        style={{ transition: "transform 80ms, background-color 80ms" }}
+        aria-label="Throw bomb"
+      >
+        💣
+        {bombCount > 0 && (
+          <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-black/80 border border-white/20 text-[10px] flex items-center justify-center">
+            {bombCount}
+          </span>
+        )}
       </button>
     </div>
   );

@@ -43,9 +43,9 @@ export function Scoreboard({ entries, selfId }: { entries: Entry[]; selfId: stri
   }, [entries]);
 
   return (
-    <div className="absolute top-4 right-4 w-52 bg-arena-panel/80 backdrop-blur rounded-lg border border-white/10 p-3 pointer-events-none select-none">
-      <div className="text-xs uppercase tracking-wider text-white/50 mb-2">Leaderboard</div>
-      <ol className="space-y-1">
+    <div className="absolute top-2 sm:top-4 right-2 sm:right-4 safe-top safe-right w-36 sm:w-52 bg-arena-panel/80 backdrop-blur rounded-lg border border-white/10 p-2 sm:p-3 pointer-events-none select-none">
+      <div className="text-[10px] sm:text-xs uppercase tracking-wider text-white/50 mb-1 sm:mb-2">Leaderboard</div>
+      <ol className="space-y-0.5 sm:space-y-1">
         {entries.map((e, i) => (
           <li
             key={e.id}
@@ -53,9 +53,9 @@ export function Scoreboard({ entries, selfId }: { entries: Entry[]; selfId: stri
               if (el) rowRefs.current.set(e.id, el);
               else rowRefs.current.delete(e.id);
             }}
-            className={`flex justify-between text-sm ${e.id === selfId ? "text-arena-accent font-semibold" : "text-white/80"}`}
+            className={`flex justify-between text-[11px] sm:text-sm ${e.id === selfId ? "text-arena-accent font-semibold" : "text-white/80"}`}
           >
-            <span className="truncate max-w-[110px]">
+            <span className="truncate max-w-[70px] sm:max-w-[110px]">
               {i + 1}. {e.name}
             </span>
             <span>{e.score}</span>

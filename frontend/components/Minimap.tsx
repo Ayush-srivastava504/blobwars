@@ -53,8 +53,8 @@ export function Minimap({ data, raised }: { data: MinimapData | null; raised?: b
       ref={canvasRef}
       width={SIZE}
       height={SIZE}
-      className={`absolute z-0 right-4 rounded-lg border border-white/10 pointer-events-none transition-[bottom] duration-150 ${
-        raised ? "bottom-48" : "bottom-32"
+      className={`absolute z-0 right-2 sm:right-4 safe-right w-[100px] h-[100px] sm:w-[150px] sm:h-[150px] rounded-lg border border-white/10 pointer-events-none transition-[bottom] duration-150 ${
+        raised ? "bottom-36 sm:bottom-48" : "bottom-24 sm:bottom-32"
       }`}
     />
   );

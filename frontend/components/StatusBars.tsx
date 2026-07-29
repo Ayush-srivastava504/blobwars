@@ -13,6 +13,7 @@ export function StatusBars({
   mass,
   score,
   coins,
+  bombs,
   raised,
 }: {
   health: number;
@@ -23,6 +24,7 @@ export function StatusBars({
   mass: number;
   score: number;
   coins: number;
+  bombs?: number;
   raised?: boolean;
 }) {
   const healthPct = Math.max(0, Math.min(100, (health / maxHealth) * 100));
@@ -30,15 +32,16 @@ export function StatusBars({
 
   return (
     <div
-      className={`absolute left-1/2 -translate-x-1/2 w-[320px] select-none pointer-events-none transition-[bottom] duration-150 ${
-        raised ? "bottom-40" : "bottom-4"
+      className={`absolute left-1/2 -translate-x-1/2 w-[min(300px,92vw)] sm:w-[min(320px,88vw)] safe-bottom select-none pointer-events-none transition-[bottom] duration-150 ${
+        raised ? "bottom-36 sm:bottom-40" : "bottom-3 sm:bottom-4"
       }`}
     >
-      <div className="flex justify-between text-xs mb-1 text-white/80">
+      <div className="flex justify-between flex-wrap gap-x-2 text-[10px] sm:text-xs mb-1 text-white/80">
         <span>Lv.{level}</span>
         <span>Mass {Math.round(mass)}</span>
-        <span className="flex items-center gap-2">
+        <span className="flex items-center gap-1.5 sm:gap-2">
           <span className="text-yellow-400">🪙 {coins}</span>
+          {!!bombs && <span className="text-orange-400">💣 {bombs}</span>}
           <span>Score {score}</span>
         </span>
       </div>

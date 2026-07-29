@@ -4,7 +4,7 @@
 // at a lower patch rate and records match results to the database.
 import { Room, Client } from "@colyseus/core";
 import { nanoid } from "nanoid";
-import { ArenaState, PlayerSchema, FoodSchema, ObstacleSchema, ZombieSchema, BulletSchema } from "./schema/ArenaState";
+import { ArenaState, PlayerSchema, FoodSchema, ObstacleSchema, ZombieSchema, BulletSchema, CrateSchema, BombSchema } from "./schema/ArenaState";
 import {
   WORLD,
   SIM,
@@ -20,12 +20,14 @@ import {
   BULLET,
   WEAPONS,
   SLIDE,
+  CRATE,
+  BOMB,
   stepPosition,
   massToRadius,
   circlesOverlap,
   distance,
 } from "@blobwars/shared";
-import type { InputMessage, ShootMessage } from "@blobwars/shared";
+import type { InputMessage, ShootMessage, ThrowBombMessage } from "@blobwars/shared";
 import { recordMatchPlayerResult } from "../db/matchRepository";
 
 interface PendingInput extends InputMessage {}
@@ -46,6 +48,7 @@ export class ArenaRoom extends Room<ArenaState> {
   private matchId: string | null = null;
   private colorCursor = 0;
   private bulletSpawnedAt = new Map<string, number>();
+  private bombStart = new Map<string, { x: number; y: number }>();
 
   async onCreate(options: { isPrivate?: boolean; code?: string; name?: string }) {
     this.setState(new ArenaState());
@@ -89,6 +92,10 @@ export class ArenaRoom extends Room<ArenaState> {
 
     this.onMessage(MSG.SLIDE, (client) => {
       this.handleSlide(client.sessionId);
+    });
+
+    this.onMessage(MSG.THROW_BOMB, (client, message: ThrowBombMessage) => {
+      this.handleThrowBomb(client.sessionId, message);
     });
 
     const dt = 1000 / SIM.TICK_RATE;
@@ -266,6 +273,8 @@ export class ArenaRoom extends Room<ArenaState> {
     this.updateZombies(dtSeconds);
     this.handleZombieCombat();
     this.updateBullets(dtSeconds);
+    this.handleCrateCollisions();
+    this.updateBombs(dtSeconds);
   }
 
   // ---- Shooting (fire-button bullets, zombies-only PvE damage) ----
@@ -435,7 +444,112 @@ export class ArenaRoom extends Room<ArenaState> {
       this.state.waveState = "intermission";
       this.state.waveEndsOrStartsAt = now + WAVE.INTERMISSION_MS;
       this.broadcast(MSG.KILL_FEED, { victim: "", killer: `Wave ${this.state.wave} cleared!` });
+      this.spawnCrate();
     }
+  }
+
+  // ---- Supply crate: dropped once per cleared wave. Grants a heal, a
+  // handful of coins, and 2 throwable bombs to whichever player reaches it
+  // first. ----
+
+  private spawnCrate() {
+    const pos = this.randomFreePosition(CRATE.RADIUS);
+    const crate = new CrateSchema();
+    crate.id = nanoid(8);
+    crate.x = pos.x;
+    crate.y = pos.y;
+    this.state.crates.set(crate.id, crate);
+  }
+
+  private handleCrateCollisions() {
+    if (this.state.crates.size === 0) return;
+
+    for (const player of this.state.players.values()) {
+      if (player.state !== "alive") continue;
+      const radius = massToRadius(player.mass);
+
+      for (const [crateId, crate] of this.state.crates) {
+        if (!circlesOverlap(player.x, player.y, radius, crate.x, crate.y, CRATE.RADIUS)) continue;
+
+        player.health = Math.min(player.maxHealth, player.health + CRATE.HEAL_AMOUNT);
+        player.coins += Math.floor(CRATE.COINS_MIN + Math.random() * (CRATE.COINS_MAX - CRATE.COINS_MIN));
+        player.bombs += CRATE.BOMBS_GRANTED;
+        this.state.crates.delete(crateId);
+        this.broadcast(MSG.KILL_FEED, { victim: "", killer: `${player.name} grabbed the supply crate!` });
+        break;
+      }
+    }
+  }
+
+  // ---- Thrown bombs: fly in a straight line out to BOMB.MAX_RANGE (or
+  // until they hit an obstacle/world edge), then explode dealing AOE
+  // damage to zombies — same PvE-only pattern as bullets. ----
+
+  private handleThrowBomb(sessionId: string, message: ThrowBombMessage) {
+    const player = this.state.players.get(sessionId);
+    if (!player || player.state !== "alive") return;
+    if (player.bombs <= 0) return;
+
+    const len = Math.hypot(message.dirX, message.dirY) || 1;
+    const dirX = message.dirX / len;
+    const dirY = message.dirY / len;
+    const radius = massToRadius(player.mass);
+
+    player.bombs -= 1;
+
+    const bomb = new BombSchema();
+    bomb.id = nanoid(8);
+    bomb.ownerId = sessionId;
+    bomb.x = player.x + dirX * (radius + 6);
+    bomb.y = player.y + dirY * (radius + 6);
+    bomb.dirX = dirX;
+    bomb.dirY = dirY;
+    this.state.bombs.set(bomb.id, bomb);
+    this.bombStart.set(bomb.id, { x: bomb.x, y: bomb.y });
+  }
+
+  private updateBombs(dtSeconds: number) {
+    if (this.state.bombs.size === 0) return;
+
+    for (const [bombId, bomb] of this.state.bombs) {
+      bomb.x += bomb.dirX * BOMB.SPEED * dtSeconds;
+      bomb.y += bomb.dirY * BOMB.SPEED * dtSeconds;
+
+      const start = this.bombStart.get(bombId);
+      const traveled = start ? distance(bomb.x, bomb.y, start.x, start.y) : 0;
+
+      let shouldExplode = traveled >= BOMB.MAX_RANGE;
+      if (bomb.x < 0 || bomb.x > WORLD.WIDTH || bomb.y < 0 || bomb.y > WORLD.HEIGHT) shouldExplode = true;
+      if (!shouldExplode) {
+        for (const obstacle of this.state.obstacles.values()) {
+          if (circlesOverlap(bomb.x, bomb.y, 6, obstacle.x, obstacle.y, obstacle.radius)) {
+            shouldExplode = true;
+            break;
+          }
+        }
+      }
+
+      if (shouldExplode) {
+        this.explodeBomb(bombId, bomb);
+      }
+    }
+  }
+
+  private explodeBomb(bombId: string, bomb: BombSchema) {
+    this.broadcast(MSG.EXPLOSION, { x: bomb.x, y: bomb.y });
+
+    for (const [zombieId, zombie] of this.state.zombies) {
+      if (zombie.state !== "alive") continue;
+      if (distance(bomb.x, bomb.y, zombie.x, zombie.y) > BOMB.EXPLOSION_RADIUS) continue;
+
+      zombie.health = Math.max(0, zombie.health - BOMB.DAMAGE);
+      if (zombie.health <= 0) {
+        this.killZombie(zombieId, bomb.ownerId);
+      }
+    }
+
+    this.state.bombs.delete(bombId);
+    this.bombStart.delete(bombId);
   }
 
   private startNextWave() {

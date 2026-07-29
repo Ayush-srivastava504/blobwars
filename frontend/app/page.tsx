@@ -19,6 +19,7 @@ import {
 import { joinPublicArena, joinRoomById } from "@/lib/colyseusClient";
 import { GameCanvas } from "@/components/GameCanvas";
 import { GlobalChat } from "@/components/GlobalChat";
+import { isTouchDevice } from "@/lib/device";
 
 declare global {
   interface Window {
@@ -35,10 +36,12 @@ export default function LobbyPage() {
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [room, setRoom] = useState<Room | null>(null);
+  const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
     const existing = getUser();
     if (existing) setUser(existing);
+    setIsMobile(isTouchDevice());
   }, []);
 
   useEffect(() => {
@@ -132,13 +135,15 @@ export default function LobbyPage() {
   }
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center px-4">
+    <main className="min-h-screen flex flex-col items-center justify-center px-4 py-8 sm:py-4">
       <script src="https://accounts.google.com/gsi/client" async defer />
 
-      <h1 className="text-5xl font-extrabold mb-2 tracking-tight">
+      <h1 className="text-4xl sm:text-5xl font-extrabold mb-2 tracking-tight text-center">
         Blob<span className="text-arena-accent">Wars</span>
       </h1>
-      <p className="text-white/50 mb-10">Real-time multiplayer arena — eat, grow, survive.</p>
+      <p className="text-white/50 mb-6 sm:mb-10 text-sm sm:text-base text-center px-2">
+        Real-time multiplayer arena — eat, grow, survive.
+      </p>
 
       {!user ? (
         <div className="w-full max-w-sm bg-arena-panel rounded-xl border border-white/10 p-6 space-y-4">
@@ -175,6 +180,15 @@ export default function LobbyPage() {
             >
               {connecting ? "Connecting…" : "Play Now"}
             </button>
+
+            <div className="mt-4 flex items-center justify-center gap-2 text-xs text-white/40">
+              <span>{isMobile ? "📱" : "🖥️"}</span>
+              {isMobile ? (
+                <span>Mobile controls detected — on-screen joystick + fire button</span>
+              ) : (
+                <span>Computer controls detected — WASD to move, mouse to aim &amp; shoot</span>
+              )}
+            </div>
           </div>
 
           <div className="bg-arena-panel rounded-xl border border-white/10 p-6 space-y-3">

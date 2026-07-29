@@ -18,6 +18,7 @@ import {
   SIM,
   BULLET,
   WEAPONS,
+  BOMB,
   massToRadius,
   stepPosition,
   MSG,
@@ -116,6 +117,7 @@ export interface GameUICallbacks {
     state: string;
     equippedWeapon: string;
     ownedWeapons: string[];
+    bombs: number;
   }) => void;
   onScoreboard: (entries: { id: string; name: string; score: number; kills: number }[]) => void;
   onPing: (ms: number) => void;
@@ -139,6 +141,8 @@ export class ArenaScene extends Phaser.Scene {
   private obstacleVisuals = new Map<string, Phaser.GameObjects.Arc>();
   private zombieVisuals = new Map<string, ZombieVisual>();
   private bulletVisuals = new Map<string, BulletVisual>();
+  private crateVisuals = new Map<string, Phaser.GameObjects.Container>();
+  private bombVisuals = new Map<string, { img: Phaser.GameObjects.Image; targetX: number; targetY: number }>();
 
   private selfShadow?: Phaser.GameObjects.Ellipse;
   private selfSprite?: Phaser.GameObjects.Sprite;
@@ -157,6 +161,16 @@ export class ArenaScene extends Phaser.Scene {
   private nextSlideAllowedAt = 0;
   private slideAnimUntil = 0;
   private slideKey?: Phaser.Input.Keyboard.Key;
+
+  // Bomb throw: 'Q' on desktop (held to aim, release to throw) or the
+  // on-screen bomb button on mobile (see setBombAiming/throwBomb below).
+  // While aiming, a dotted line is drawn from the player out to
+  // BOMB.MAX_RANGE along the current aim direction so you can see where
+  // it'll land before committing to the throw.
+  private bombKey?: Phaser.Input.Keyboard.Key;
+  private bombAiming = false;
+  private bombTrajectory?: Phaser.GameObjects.Graphics;
+  private selfBombCount = 0;
 
   private inputSeq = 0;
   private pendingInputs: PendingInput[] = [];
@@ -229,6 +243,11 @@ export class ArenaScene extends Phaser.Scene {
       this.load.image(gunTextureKey(weapon.id), weapon.icon);
     }
 
+    // Wave-end supply crate + its contents' icons, and the thrown bomb.
+    this.load.image("pickup-crate", "/assets/pickups/crate.png");
+    this.load.image("pickup-health", "/assets/pickups/health-potion.png");
+    this.load.image("pickup-bomb", "/assets/pickups/bomb.png");
+
     this.load.on("loaderror", (file: { key: string; src: string }) => {
       console.error("[ArenaScene] asset failed to load:", file.key, file.src);
     });
@@ -250,7 +269,9 @@ export class ArenaScene extends Phaser.Scene {
     if (this.input.keyboard) {
       this.keys = this.input.keyboard.addKeys("W,A,S,D,UP,LEFT,DOWN,RIGHT,SPACE") as any;
       this.slideKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
+      this.bombKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
     }
+    this.bombTrajectory = this.add.graphics().setDepth(50);
     const updateAimFromPointer = (pointer: Phaser.Input.Pointer) => {
       if (!this.selfContainer) return;
       const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
@@ -324,6 +345,7 @@ export class ArenaScene extends Phaser.Scene {
     $(this.room.state).players.onAdd((player, sessionId) => {
       if (sessionId === this.sessionId) {
         this.selfEquippedWeapon = player.equippedWeapon || "pistol";
+        this.selfBombCount = player.bombs ?? 0;
         this.createSelfVisual(player.x, player.y, player.mass, player.color);
         this.selfWasAlive = player.state === "alive";
         this.selfLevel = player.level;
@@ -370,7 +392,9 @@ export class ArenaScene extends Phaser.Scene {
             state: player.state,
             equippedWeapon: player.equippedWeapon || "pistol",
             ownedWeapons: Array.from(player.ownedWeapons ?? []),
+            bombs: player.bombs ?? 0,
           });
+          this.selfBombCount = player.bombs ?? 0;
         } else {
           const rv = this.remotePlayers.get(sessionId);
           if (rv) {
@@ -426,6 +450,53 @@ export class ArenaScene extends Phaser.Scene {
       this.bulletVisuals.delete(id);
     });
 
+    // Supply crate — dropped once per cleared wave (see ArenaRoom.spawnCrate).
+    // A gentle bob + glow so it reads as a pickup from across the arena.
+    $(this.room.state).crates.onAdd((crate) => {
+      const img = this.add.image(0, 0, "pickup-crate").setDisplaySize(40, 40);
+      const glow = this.add.circle(0, 4, 26, 0xffe066, 0.18);
+      const container = this.add.container(crate.x, crate.y, [glow, img]).setDepth(5);
+      this.crateVisuals.set(crate.id, container);
+      this.tweens.add({
+        targets: container,
+        y: crate.y - 8,
+        duration: 900,
+        yoyo: true,
+        repeat: -1,
+        ease: "Sine.easeInOut",
+      });
+    });
+    $(this.room.state).crates.onRemove((crate, id) => {
+      const container = this.crateVisuals.get(id);
+      if (container) {
+        this.spawnFloatingText(crate.x, crate.y - 20, "Supply crate!", "#ffe066");
+        container.destroy();
+      }
+      this.crateVisuals.delete(id);
+    });
+
+    // Thrown bombs — dotted-line aim preview is drawn separately in
+    // update(); this just renders the projectile itself in flight.
+    $(this.room.state).bombs.onAdd((bomb) => {
+      const img = this.add.image(bomb.x, bomb.y, "pickup-bomb").setDisplaySize(18, 18).setDepth(6);
+      this.bombVisuals.set(bomb.id, { img, targetX: bomb.x, targetY: bomb.y });
+      $(bomb).onChange(() => {
+        const bv = this.bombVisuals.get(bomb.id);
+        if (!bv) return;
+        bv.targetX = bomb.x;
+        bv.targetY = bomb.y;
+      });
+    });
+    $(this.room.state).bombs.onRemove((_bomb, id) => {
+      const bv = this.bombVisuals.get(id);
+      bv?.img.destroy();
+      this.bombVisuals.delete(id);
+    });
+
+    this.room.onMessage(MSG.EXPLOSION, (data: { x: number; y: number }) => {
+      this.spawnExplosionFx(data.x, data.y);
+    });
+
     this.input.mouse?.disableContextMenu();
     this.time.addEvent({ delay: 2000, loop: true, callback: () => this.sendPing() });
 
@@ -454,6 +525,69 @@ export class ArenaScene extends Phaser.Scene {
     this.spawnMuzzleFlash(this.selfContainer.x, this.selfContainer.y, this.aimDir.x, this.aimDir.y);
     playShoot();
   }
+
+  /** Called when the bomb button/key is released (see update()/setBombAiming). */
+  throwBomb() {
+    this.bombAiming = false;
+    if (!this.selfContainer) return;
+    if (this.selfBombCount <= 0) return;
+    if (this.room.state.players.get(this.sessionId)?.state !== "alive") return;
+
+    this.room.send(MSG.THROW_BOMB, { dirX: this.aimDir.x, dirY: this.aimDir.y });
+    this.selfBombCount = Math.max(0, this.selfBombCount - 1); // optimistic, server corrects on next sync
+  }
+
+  /** Draws (or clears) the dotted aim-trajectory line while a bomb throw is being aimed. */
+  private updateBombTrajectory() {
+    if (!this.bombTrajectory) return;
+    this.bombTrajectory.clear();
+    if (!this.bombAiming || !this.selfContainer) return;
+
+    const startX = this.selfContainer.x;
+    const startY = this.selfContainer.y;
+    const endX = startX + this.aimDir.x * BOMB.MAX_RANGE;
+    const endY = startY + this.aimDir.y * BOMB.MAX_RANGE;
+
+    const dashLen = 10;
+    const gapLen = 8;
+    const totalLen = Math.hypot(endX - startX, endY - startY);
+    const steps = Math.floor(totalLen / (dashLen + gapLen));
+    const ux = (endX - startX) / (totalLen || 1);
+    const uy = (endY - startY) / (totalLen || 1);
+
+    this.bombTrajectory.lineStyle(3, 0xffa733, 0.85);
+    for (let i = 0; i < steps; i++) {
+      const segStart = i * (dashLen + gapLen);
+      const segEnd = segStart + dashLen;
+      this.bombTrajectory.beginPath();
+      this.bombTrajectory.moveTo(startX + ux * segStart, startY + uy * segStart);
+      this.bombTrajectory.lineTo(startX + ux * segEnd, startY + uy * segEnd);
+      this.bombTrajectory.strokePath();
+    }
+    // Landing-radius ring at the end of the throw so the blast area is
+    // clear before you commit.
+    this.bombTrajectory.lineStyle(2, 0xffa733, 0.5);
+    this.bombTrajectory.strokeCircle(endX, endY, 18);
+  }
+
+  private spawnExplosionFx(x: number, y: number) {
+    const ring = this.add.circle(x, y, 10, 0xff9d00, 0).setStrokeStyle(4, 0xffcc66, 1).setDepth(7);
+    this.tweens.add({
+      targets: ring,
+      radius: 90,
+      alpha: { from: 1, to: 0 },
+      duration: 380,
+      ease: "Cubic.easeOut",
+      onUpdate: () => ring.setStrokeStyle(4, 0xffcc66, ring.alpha),
+      onComplete: () => ring.destroy(),
+    });
+    const flash = this.add.circle(x, y, 45, 0xffe066, 0.5).setDepth(6);
+    this.tweens.add({ targets: flash, alpha: 0, scale: 1.4, duration: 260, onComplete: () => flash.destroy() });
+
+    const dist = this.selfContainer ? Phaser.Math.Distance.Between(x, y, this.selfContainer.x, this.selfContainer.y) : 9999;
+    if (dist < 400) this.cameras.main.shake(140, 0.004);
+  }
+
 
   private spawnMuzzleFlash(x: number, y: number, dirX: number, dirY: number) {
     const tipX = x + dirX * 30;
@@ -527,18 +661,22 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   /** Positions/rotates the small hand-gun overlay so its muzzle actually
-   * points toward (dirX, dirY) — previously this only flipped the gun
-   * left/right with the body and left its rotation fixed, so the barrel
-   * pointed at a constant angle instead of toward the aim/movement
-   * direction. Flipping vertically past the +/-90 degree mark keeps the
-   * gun right-side-up instead of upside-down when aiming to the left. */
+   * points toward (dirX, dirY). The gun art (see /assets/weapons/shop/*.png)
+   * is drawn grip-left, barrel-right, with origin pinned at the grip
+   * (0.15, 0.5) — rotating that origin by the aim angle is what swings the
+   * barrel to face the aim direction. The previous version *also* swapped
+   * the gun's X position to the opposite side of the body whenever the aim
+   * crossed vertical; combined with the rotation, that extra swap is what
+   * could make the gun read as aiming backwards. Anchor position is now
+   * fixed — only rotation aims the barrel — and flipY (past +/-90 degrees)
+   * keeps the gun right-side-up instead of upside-down when aiming left. */
   private positionGunSprite(gun: Phaser.GameObjects.Image, dirX: number, dirY: number) {
     const len = Math.hypot(dirX, dirY) || 1;
     const nx = dirX / len;
     const ny = dirY / len;
     const angle = Math.atan2(ny, nx);
     const facingLeft = Math.abs(angle) > Math.PI / 2;
-    gun.setPosition(GUN_OFFSET_X * (facingLeft ? -1 : 1), GUN_OFFSET_Y);
+    gun.setPosition(GUN_OFFSET_X, GUN_OFFSET_Y);
     gun.setRotation(angle);
     gun.setFlipY(facingLeft);
   }
@@ -547,9 +685,27 @@ export class ArenaScene extends Phaser.Scene {
   private setGunTexture(gun: Phaser.GameObjects.Image | undefined, weaponId: string) {
     if (!gun) return;
     const key = gunTextureKey(weaponId);
-    if (!this.textures.exists(key)) return;
+    if (!this.textures.exists(key)) {
+      // Previously failed silently here, which is the likely cause of
+      // "equipped gun doesn't show" reports — if a weapon icon 404s or the
+      // id doesn't match WEAPONS, the overlay just kept whatever texture it
+      // had before with no signal anything was wrong. Now it's at least
+      // visible in devtools.
+      console.warn(`[ArenaScene] missing gun texture for weapon "${weaponId}" (key: ${key})`);
+      return;
+    }
     gun.setTexture(key);
     gun.setDisplaySize(GUN_DISPLAY_W, GUN_DISPLAY_W * (gun.height / gun.width));
+  }
+
+  /** Optimistically swaps the local player's gun overlay the instant the
+   * Shop's Buy/Equip button is clicked, instead of waiting for the
+   * server's state patch to round-trip back down. The server remains
+   * authoritative — the next state sync will just confirm (or correct)
+   * this. Called from GameCanvas. */
+  setEquippedWeaponPreview(weaponId: string) {
+    this.selfEquippedWeapon = weaponId;
+    if (this.selfGunSprite) this.setGunTexture(this.selfGunSprite, weaponId);
   }
 
   private createSelfVisual(x: number, y: number, mass: number, _color: number) {
@@ -788,6 +944,11 @@ export class ArenaScene extends Phaser.Scene {
     this.triggerSlide();
   }
 
+  /** Called on bomb-button/Q pointerdown (and release) — toggles the dotted aim-trajectory line drawn in update(). */
+  setBombAiming(active: boolean) {
+    this.bombAiming = active;
+  }
+
   /** Shared by the Shift key and the Slide button: client-side cooldown gate
    * + local animation feel, while the server resolves the actual dash
    * displacement authoritatively (see ArenaRoom.handleSlide). */
@@ -909,6 +1070,24 @@ export class ArenaScene extends Phaser.Scene {
       bv.gfx.x = Phaser.Math.Linear(bv.gfx.x, bv.targetX, lerpFactor);
       bv.gfx.y = Phaser.Math.Linear(bv.gfx.y, bv.targetY, lerpFactor);
     }
+
+    for (const bv of this.bombVisuals.values()) {
+      bv.img.x = Phaser.Math.Linear(bv.img.x, bv.targetX, lerpFactor);
+      bv.img.y = Phaser.Math.Linear(bv.img.y, bv.targetY, lerpFactor);
+      bv.img.rotation += 0.12;
+    }
+
+    // Desktop bomb aim: hold Q to show the dotted trajectory, release to
+    // throw. Mirrors the mobile bomb button's press/release behavior
+    // (setBombAiming/throwBomb), so both paths share the same aim state.
+    if (this.bombKey) {
+      if (Phaser.Input.Keyboard.JustDown(this.bombKey)) {
+        this.setBombAiming(true);
+      } else if (Phaser.Input.Keyboard.JustUp(this.bombKey)) {
+        this.throwBomb();
+      }
+    }
+    this.updateBombTrajectory();
 
     this.emitMinimap();
   }

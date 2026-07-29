@@ -17,6 +17,7 @@ import { KillFeed, DeathOverlay } from "./KillFeedAndDeath";
 import { VirtualControls } from "./VirtualControls";
 import { Shop } from "./Shop";
 import { setSfxMuted } from "../lib/sfx";
+import { isTouchDevice } from "../lib/device";
 
 export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -35,6 +36,7 @@ export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void })
     state: "alive",
     equippedWeapon: "pistol",
     ownedWeapons: ["pistol"] as string[],
+    bombs: 0,
   });
   const [shopOpen, setShopOpen] = useState(false);
   const [scoreboard, setScoreboard] = useState<{ id: string; name: string; score: number; kills: number }[]>([]);
@@ -44,10 +46,15 @@ export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void })
   const [killFeed, setKillFeed] = useState<{ id: number; text: string }[]>([]);
   const [deathInfo, setDeathInfo] = useState<{ byName: string } | null>(null);
   const [muted, setMuted] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const [waveInfo, setWaveInfo] = useState<{ wave: number; waveState: string; waveEndsOrStartsAt: number } | null>(
     null
   );
   const killFeedId = useRef(0);
+
+  useEffect(() => {
+    setIsMobile(isTouchDevice());
+  }, []);
 
   const getArenaScene = () => {
     const scene = sceneRef.current ?? gameRef.current?.scene.getScene("ArenaScene");
@@ -140,6 +147,7 @@ export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void })
         mass={self.mass}
         score={self.score}
         coins={self.coins}
+        bombs={self.bombs}
         raised
       />
       <Scoreboard entries={scoreboard} selfId={room.sessionId} />
@@ -147,17 +155,22 @@ export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void })
       <PerfIndicators ping={ping} fps={fps} waveInfo={waveInfo} />
       <KillFeed messages={killFeed} />
 
-      <VirtualControls
-        onMove={(dir) => getArenaScene()?.setVirtualMove?.(dir)}
-        onMoveEnd={() => getArenaScene()?.clearVirtualMove?.()}
-        onFire={() => getArenaScene()?.virtualFire?.()}
-        onFireHeld={(held) => getArenaScene()?.setVirtualFireHeld?.(held)}
-        onSlide={() => getArenaScene()?.virtualSlide?.()}
-      />
+      {isMobile && (
+        <VirtualControls
+          onMove={(dir) => getArenaScene()?.setVirtualMove?.(dir)}
+          onMoveEnd={() => getArenaScene()?.clearVirtualMove?.()}
+          onFire={() => getArenaScene()?.virtualFire?.()}
+          onFireHeld={(held) => getArenaScene()?.setVirtualFireHeld?.(held)}
+          onSlide={() => getArenaScene()?.virtualSlide?.()}
+          onBombAim={(aiming) => getArenaScene()?.setBombAiming?.(aiming)}
+          onBombThrow={() => getArenaScene()?.throwBomb?.()}
+          bombCount={self.bombs}
+        />
+      )}
 
       <button
         onClick={() => setShopOpen(true)}
-        className="absolute top-1/2 -translate-y-1/2 right-4 px-3 py-2 rounded-lg bg-arena-panel/80 backdrop-blur border border-white/10 text-xs font-semibold text-white/80 hover:text-white hover:bg-yellow-500/30 transition-colors flex items-center gap-1.5 z-20"
+        className="absolute top-1/2 -translate-y-1/2 right-2 sm:right-4 safe-right px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg bg-arena-panel/80 backdrop-blur border border-white/10 text-[11px] sm:text-xs font-semibold text-white/80 hover:text-white hover:bg-yellow-500/30 transition-colors flex items-center gap-1 sm:gap-1.5 z-20"
       >
         🛒 Shop
       </button>
@@ -167,21 +180,36 @@ export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void })
         coins={self.coins}
         ownedWeapons={self.ownedWeapons}
         equippedWeapon={self.equippedWeapon}
-        onBuy={(weaponId) => room.send(MSG.BUY_WEAPON, weaponId)}
-        onEquip={(weaponId) => room.send(MSG.EQUIP_WEAPON, weaponId)}
+        onBuy={(weaponId) => {
+          room.send(MSG.BUY_WEAPON, weaponId);
+          // Optimistic: don't wait for the server patch to round-trip
+          // before the gun overlay / Shop UI reflect the new weapon.
+          setSelf((s) => ({
+            ...s,
+            equippedWeapon: weaponId,
+            ownedWeapons: s.ownedWeapons.includes(weaponId) ? s.ownedWeapons : [...s.ownedWeapons, weaponId],
+          }));
+          getArenaScene()?.setEquippedWeaponPreview?.(weaponId);
+        }}
+        onEquip={(weaponId) => {
+          room.send(MSG.EQUIP_WEAPON, weaponId);
+          setSelf((s) => ({ ...s, equippedWeapon: weaponId }));
+          getArenaScene()?.setEquippedWeaponPreview?.(weaponId);
+        }}
         onClose={() => setShopOpen(false)}
       />
 
       <button
         onClick={handleExit}
-        className="absolute top-16 left-4 px-3 py-1.5 rounded-lg bg-arena-panel/80 backdrop-blur border border-white/10 text-xs font-semibold text-white/80 hover:text-white hover:bg-arena-danger/70 transition-colors"
+        className="absolute top-2 sm:top-4 left-2 sm:left-4 safe-top safe-left px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg bg-arena-panel/80 backdrop-blur border border-white/10 text-[11px] sm:text-xs font-semibold text-white/80 hover:text-white hover:bg-arena-danger/70 transition-colors z-20"
       >
-        ← Exit to Lobby
+        ← <span className="hidden sm:inline">Exit to Lobby</span>
+        <span className="sm:hidden">Exit</span>
       </button>
 
       <button
         onClick={toggleMute}
-        className="absolute top-4 left-1/2 -translate-x-1/2 w-9 h-9 rounded-lg bg-arena-panel/80 backdrop-blur border border-white/10 flex items-center justify-center text-white/80 hover:text-white transition-colors"
+        className="absolute top-2 sm:top-4 left-1/2 -translate-x-1/2 safe-top w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-arena-panel/80 backdrop-blur border border-white/10 flex items-center justify-center text-sm sm:text-base text-white/80 hover:text-white transition-colors z-20"
         aria-label={muted ? "Unmute sound" : "Mute sound"}
       >
         {muted ? "🔇" : "🔊"}

@@ -32,17 +32,17 @@ export function Shop({
       onClick={onClose}
     >
       <div
-        className="w-[min(92vw,560px)] max-h-[80vh] overflow-y-auto rounded-2xl border border-white/10 bg-arena-panel p-5 animate-zoomIn"
+        className="w-[min(94vw,560px)] max-h-[85vh] sm:max-h-[80vh] overflow-y-auto rounded-2xl border border-white/10 bg-arena-panel p-3 sm:p-5 safe-bottom animate-zoomIn"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-white">Gun Shop</h2>
-          <span className="flex items-center gap-1.5 text-yellow-400 font-semibold">
+        <div className="flex items-center justify-between mb-3 sm:mb-4">
+          <h2 className="text-base sm:text-lg font-bold text-white">Gun Shop</h2>
+          <span className="flex items-center gap-1.5 text-yellow-400 font-semibold text-sm sm:text-base">
             🪙 {coins}
           </span>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
           {WEAPONS.map((weapon) => {
             const owned = ownedWeapons.includes(weapon.id);
             const equipped = equippedWeapon === weapon.id;

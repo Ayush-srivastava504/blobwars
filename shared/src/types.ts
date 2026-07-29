@@ -20,6 +20,11 @@ export interface ShootMessage {
   dirY: number;
 }
 
+export interface ThrowBombMessage {
+  dirX: number;
+  dirY: number;
+}
+
 export type PlayerState = "alive" | "dead" | "respawning";
 
 export interface PlayerSnapshot {
@@ -39,6 +44,7 @@ export interface PlayerSnapshot {
   lastProcessedInputSeq: number;
   equippedWeapon: string;
   ownedWeapons: string[];
+  bombs: number;
 }
 
 export interface FoodSnapshot {
@@ -83,6 +89,8 @@ export const MSG = {
   BUY_WEAPON: "buyWeapon",
   EQUIP_WEAPON: "equipWeapon",
   SHOP_ERROR: "shopError",
+  THROW_BOMB: "throwBomb",
+  EXPLOSION: "explosion",
 } as const;
 
 export type MsgType = (typeof MSG)[keyof typeof MSG];

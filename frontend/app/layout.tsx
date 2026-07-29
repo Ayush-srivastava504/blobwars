@@ -6,9 +6,56 @@ import type { Metadata } from "next";
 import Script from "next/script";
 import "./globals.css";
 
+const SITE_NAME = "Blob Wars";
+const SITE_DESCRIPTION =
+  "Blob Wars is a free real-time multiplayer .io arena shooter — survive zombie waves, earn coins, buy and upgrade guns, and battle other players. Play instantly in your browser, no download.";
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://blobwars.io";
+
 export const metadata: Metadata = {
-  title: "Blob Wars — Multiplayer Arena",
-  description: "Real-time multiplayer .io arena game",
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: "Blob Wars — Free Multiplayer Zombie Arena .io Game",
+    template: "%s — Blob Wars",
+  },
+  description: SITE_DESCRIPTION,
+  keywords: [
+    "blob wars",
+    "io game",
+    "multiplayer io games",
+    "browser game",
+    "zombie survival game",
+    "free online shooter",
+    "multiplayer zombie game",
+    "gun game online",
+  ],
+  applicationName: SITE_NAME,
+  authors: [{ name: SITE_NAME }],
+  robots: { index: true, follow: true },
+  openGraph: {
+    type: "website",
+    url: SITE_URL,
+    siteName: SITE_NAME,
+    title: "Blob Wars — Free Multiplayer Zombie Arena .io Game",
+    description: SITE_DESCRIPTION,
+    images: [{ url: "/og-image.png", width: 1200, height: 630, alt: "Blob Wars gameplay" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Blob Wars — Free Multiplayer Zombie Arena .io Game",
+    description: SITE_DESCRIPTION,
+    images: ["/og-image.png"],
+  },
+  icons: {
+    icon: "/favicon.ico",
+  },
+};
+
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  themeColor: "#0b0e14",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

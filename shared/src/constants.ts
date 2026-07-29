@@ -119,3 +119,26 @@ export const WAVE = {
   INTERMISSION_MS: 6000,
   FIRST_WAVE_DELAY_MS: 4000,
 } as const;
+
+// Supply crate dropped once when a wave is cleared. Any player who walks
+// over it gets healed, a handful of coins, and 2 throwable bombs.
+export const CRATE = {
+  RADIUS: 26,
+  HEAL_AMOUNT: 40,
+  COINS_MIN: 20,
+  COINS_MAX: 50,
+  BOMBS_GRANTED: 2,
+} as const;
+
+// Thrown grenade: travels in a straight line from the thrower out to
+// MAX_RANGE (or until it hits an obstacle) and then explodes, dealing AOE
+// damage to zombies caught in EXPLOSION_RADIUS. MAX_RANGE doubles as the
+// length of the dotted aim-trajectory line drawn on the client while the
+// throw button is held.
+export const BOMB = {
+  SPEED: 700,
+  MAX_RANGE: 420,
+  EXPLOSION_RADIUS: 110,
+  DAMAGE: 60,
+  STARTING_COUNT: 0,
+} as const;

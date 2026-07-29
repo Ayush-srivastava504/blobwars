@@ -27,6 +27,8 @@ export class PlayerSchema extends Schema {
   // one they want to fire with.
   @type("string") equippedWeapon: string = "pistol";
   @type(["string"]) ownedWeapons = new ArraySchema<string>("pistol");
+  // Thrown grenades picked up from wave-end supply crates.
+  @type("number") bombs: number = 0;
 }
 
 export class ZombieSchema extends Schema {
@@ -65,12 +67,31 @@ export class ObstacleSchema extends Schema {
   @type("number") radius: number = 100;
 }
 
+// Supply crate dropped once when a wave is cleared — see ArenaRoom.spawnCrate.
+export class CrateSchema extends Schema {
+  @type("string") id: string = "";
+  @type("number") x: number = 0;
+  @type("number") y: number = 0;
+}
+
+// Thrown grenade in flight — see ArenaRoom.updateBombs.
+export class BombSchema extends Schema {
+  @type("string") id: string = "";
+  @type("string") ownerId: string = "";
+  @type("number") x: number = 0;
+  @type("number") y: number = 0;
+  @type("number") dirX: number = 0;
+  @type("number") dirY: number = 0;
+}
+
 export class ArenaState extends Schema {
   @type({ map: PlayerSchema }) players = new MapSchema<PlayerSchema>();
   @type({ map: FoodSchema }) food = new MapSchema<FoodSchema>();
   @type({ map: ObstacleSchema }) obstacles = new MapSchema<ObstacleSchema>();
   @type({ map: ZombieSchema }) zombies = new MapSchema<ZombieSchema>();
   @type({ map: BulletSchema }) bullets = new MapSchema<BulletSchema>();
+  @type({ map: CrateSchema }) crates = new MapSchema<CrateSchema>();
+  @type({ map: BombSchema }) bombs = new MapSchema<BombSchema>();
   @type("number") serverTime: number = 0;
   @type("number") wave: number = 0;
   @type("string") waveState: "intermission" | "active" = "intermission";

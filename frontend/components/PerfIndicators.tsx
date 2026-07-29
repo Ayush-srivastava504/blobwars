@@ -35,14 +35,14 @@ export function PerfIndicators({
   const secondsLeft = waveInfo ? Math.max(0, Math.ceil((waveInfo.waveEndsOrStartsAt - now) / 1000)) : 0;
 
   return (
-    <div className="absolute top-4 left-4 flex flex-col gap-2 select-none pointer-events-none">
-      <div className="flex gap-3 text-xs font-mono bg-arena-panel/80 backdrop-blur rounded-lg border border-white/10 px-3 py-2">
+    <div className="absolute top-12 sm:top-16 left-2 sm:left-4 safe-top safe-left flex flex-col gap-1.5 sm:gap-2 select-none pointer-events-none">
+      <div className="flex gap-2 sm:gap-3 text-[10px] sm:text-xs font-mono bg-arena-panel/80 backdrop-blur rounded-lg border border-white/10 px-2 py-1 sm:px-3 sm:py-2">
         <span className={fpsColor}>{fps} FPS</span>
         <span className="text-white/20">|</span>
         <span className={pingColor}>{ping}ms</span>
       </div>
       {waveInfo && (
-        <div className="flex gap-2 text-xs font-mono bg-arena-panel/80 backdrop-blur rounded-lg border border-white/10 px-3 py-2">
+        <div className="flex gap-1.5 sm:gap-2 text-[10px] sm:text-xs font-mono bg-arena-panel/80 backdrop-blur rounded-lg border border-white/10 px-2 py-1 sm:px-3 sm:py-2">
           <span className="text-white/90 font-semibold">Wave {waveInfo.wave}</span>
           <span className="text-white/20">|</span>
           {waveInfo.waveState === "active" ? (
