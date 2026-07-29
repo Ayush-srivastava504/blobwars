@@ -2,7 +2,7 @@
 // Players, food, and obstacles are all replicated to every client;
 // ArenaState is the root schema attached to the ArenaRoom.
 // Decorated fields here are the network-serialized wire format.
-import { Schema, MapSchema, type } from "@colyseus/schema";
+import { Schema, MapSchema, ArraySchema, type } from "@colyseus/schema";
 
 export class PlayerSchema extends Schema {
   @type("string") id: string = "";
@@ -22,6 +22,11 @@ export class PlayerSchema extends Schema {
   @type("number") coins: number = 0;
   @type("number") lastProcessedInputSeq: number = 0;
   @type("number") spawnProtectedUntil: number = 0;
+  // Coin-shop gun loadout: every player starts owning the free pistol,
+  // can buy more with coins earned from zombie kills, and equips whichever
+  // one they want to fire with.
+  @type("string") equippedWeapon: string = "pistol";
+  @type(["string"]) ownedWeapons = new ArraySchema<string>("pistol");
 }
 
 export class ZombieSchema extends Schema {
@@ -42,6 +47,7 @@ export class BulletSchema extends Schema {
   @type("number") y: number = 0;
   @type("number") dirX: number = 0;
   @type("number") dirY: number = 0;
+  @type("number") damage: number = 8;
 }
 
 export class FoodSchema extends Schema {

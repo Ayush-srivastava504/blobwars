@@ -17,6 +17,7 @@ import {
   WORLD,
   SIM,
   BULLET,
+  WEAPONS,
   massToRadius,
   stepPosition,
   MSG,
@@ -30,6 +31,7 @@ interface RemoteVisual {
   container: Phaser.GameObjects.Container;
   shadow: Phaser.GameObjects.Ellipse;
   sprite: Phaser.GameObjects.Sprite;
+  gunSprite: Phaser.GameObjects.Image;
   nameText: Phaser.GameObjects.Text;
   healthBarBg: Phaser.GameObjects.Rectangle;
   healthBarFill: Phaser.GameObjects.Rectangle;
@@ -57,24 +59,40 @@ interface BulletVisual {
   targetY: number;
 }
 
-// The hero has no combined spritesheet — /public/assets/hero only has
-// individual numbered frame PNGs (Walk-hero01_001..008.png,
-// Idle-hero01_001..012.png), each a different native size. We load each
-// frame as its own texture and build the animation from a frame-key list
-// rather than generateFrameNumbers (which needs one shared sheet).
-const HERO_WALK_FRAME_COUNT = 8;
-const HERO_IDLE_FRAME_COUNT = 12;
-const heroWalkFrameKey = (i: number) => `hero-walk-${i}`;
-const heroIdleFrameKey = (i: number) => `hero-idle-${i}`;
+// The hero pack ships each animation frame as its own transparent PNG
+// (not a packed spritesheet), each with a different native size, e.g.
+// /assets/hero/Idle-hero01_001.png .. _012.png. We load every frame as its
+// own texture (one image per key) and build Phaser animations out of the
+// per-texture frame list below. HERO_DISPLAY_H is re-applied on every frame
+// change since native sizes differ frame to frame (see ANIMATION_UPDATE
+// listeners further down) so the sprite doesn't visibly grow/shrink.
 const HERO_DISPLAY_H = 72;
-const HERO_DISPLAY_W = 108;
+const HERO_FRAME_COUNTS: Record<string, number> = {
+  Idle: 12,
+  Walk: 8,
+  Run: 7,
+  Slide: 4,
+};
+function heroFrameKey(anim: string, i: number) {
+  return `hero-${anim.toLowerCase()}-${i}`;
+}
+function heroFramePath(anim: string, i: number) {
+  return `/assets/hero/${anim}-hero01_${String(i + 1).padStart(3, "0")}.png`;
+}
 
-// Zombie has no walk sheet — only Idle/Attack/Dead/Eating/Hurt/Jump exist
-// in /public/assets/zombie. Idle.png is 9 frames of 96x96 laid out
-// horizontally; we reuse it for the walk cycle.
+// Zombie sheets are horizontal spritesheets of 96x96 frames.
 const ZOMBIE_FRAME_SIZE = 96;
-const ZOMBIE_IDLE_FRAME_COUNT = 9;
 const ZOMBIE_DISPLAY_SIZE = 56;
+const ZOMBIE_IDLE_FRAMES = 9; // Idle.png = 864/96
+const ZOMBIE_DEAD_FRAMES = 5; // Dead.png = 480/96
+
+// Small hand-gun overlay drawn beside the hero, swapped by equipped weapon.
+const GUN_DISPLAY_W = 22;
+const GUN_OFFSET_X = 16;
+const GUN_OFFSET_Y = -8;
+function gunTextureKey(weaponId: string) {
+  return `gun-${weaponId}`;
+}
 
 export interface GameUICallbacks {
   onSelfUpdate: (data: {
@@ -87,6 +105,8 @@ export interface GameUICallbacks {
     score: number;
     coins: number;
     state: string;
+    equippedWeapon: string;
+    ownedWeapons: string[];
   }) => void;
   onScoreboard: (entries: { id: string; name: string; score: number; kills: number }[]) => void;
   onPing: (ms: number) => void;
@@ -113,11 +133,21 @@ export class ArenaScene extends Phaser.Scene {
 
   private selfShadow?: Phaser.GameObjects.Ellipse;
   private selfSprite?: Phaser.GameObjects.Sprite;
+  private selfGunSprite?: Phaser.GameObjects.Image;
   private selfContainer?: Phaser.GameObjects.Container;
   private selfWasAlive = true;
   private selfLevel = 1;
   private selfHealth = 100;
   private selfFacing = 1;
+  private selfEquippedWeapon = "pistol";
+
+  // Slide/dash: client-side cooldown gate + a brief animation override so
+  // the on-screen Slide button (beside Fire, see VirtualControls) and the
+  // desktop Shift key both feel responsive even though the actual
+  // displacement is resolved authoritatively on the server.
+  private nextSlideAllowedAt = 0;
+  private slideAnimUntil = 0;
+  private slideKey?: Phaser.Input.Keyboard.Key;
 
   private inputSeq = 0;
   private pendingInputs: PendingInput[] = [];
@@ -174,16 +204,26 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   preload() {
-    for (let i = 0; i < HERO_WALK_FRAME_COUNT; i++) {
-      this.load.image(heroWalkFrameKey(i), `/assets/hero/Walk-hero01_${String(i + 1).padStart(3, "0")}.png`);
+    for (const [anim, count] of Object.entries(HERO_FRAME_COUNTS)) {
+      for (let i = 0; i < count; i++) {
+        this.load.image(heroFrameKey(anim, i), heroFramePath(anim, i));
+      }
     }
-    for (let i = 0; i < HERO_IDLE_FRAME_COUNT; i++) {
-      this.load.image(heroIdleFrameKey(i), `/assets/hero/Idle-hero01_${String(i + 1).padStart(3, "0")}.png`);
-    }
+
     this.load.spritesheet("zombie-idle", "/assets/zombie/Idle.png", {
       frameWidth: ZOMBIE_FRAME_SIZE,
       frameHeight: ZOMBIE_FRAME_SIZE,
     });
+    this.load.spritesheet("zombie-dead", "/assets/zombie/Dead.png", {
+      frameWidth: ZOMBIE_FRAME_SIZE,
+      frameHeight: ZOMBIE_FRAME_SIZE,
+    });
+
+    // Coin-shop weapon icons, reused as the small hand-gun overlay on the hero.
+    for (const weapon of WEAPONS) {
+      this.load.image(gunTextureKey(weapon.id), weapon.icon);
+    }
+
     this.load.on("loaderror", (file: { key: string; src: string }) => {
       console.error("[ArenaScene] asset failed to load:", file.key, file.src);
     });
@@ -205,6 +245,7 @@ export class ArenaScene extends Phaser.Scene {
     // getInputDirection()).
     if (this.input.keyboard) {
       this.keys = this.input.keyboard.addKeys("W,A,S,D,UP,LEFT,DOWN,RIGHT,SPACE") as any;
+      this.slideKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
     }
     const updateAimFromPointer = (pointer: Phaser.Input.Pointer, alsoSetRunDirection: boolean) => {
       if (!this.selfContainer) return;
@@ -279,12 +320,22 @@ export class ArenaScene extends Phaser.Scene {
 
     $(this.room.state).players.onAdd((player, sessionId) => {
       if (sessionId === this.sessionId) {
+        this.selfEquippedWeapon = player.equippedWeapon || "pistol";
         this.createSelfVisual(player.x, player.y, player.mass, player.color);
         this.selfWasAlive = player.state === "alive";
         this.selfLevel = player.level;
         this.selfHealth = player.health;
       } else {
-        this.createRemoteVisual(sessionId, player.x, player.y, player.mass, player.color, player.name, player.state === "alive");
+        this.createRemoteVisual(
+          sessionId,
+          player.x,
+          player.y,
+          player.mass,
+          player.color,
+          player.name,
+          player.state === "alive",
+          player.equippedWeapon || "pistol"
+        );
       }
 
       $(player).onChange(() => {
@@ -300,6 +351,10 @@ export class ArenaScene extends Phaser.Scene {
             playLevelUp();
             this.spawnFloatingText(player.x, player.y - 40, `Level ${player.level}!`, "#a970ff");
           }
+          if (player.equippedWeapon && player.equippedWeapon !== this.selfEquippedWeapon) {
+            this.selfEquippedWeapon = player.equippedWeapon;
+            this.setGunTexture(this.selfGunSprite, player.equippedWeapon);
+          }
           this.ui.onSelfUpdate({
             health: player.health,
             maxHealth: player.maxHealth,
@@ -310,6 +365,8 @@ export class ArenaScene extends Phaser.Scene {
             score: player.score,
             coins: player.coins,
             state: player.state,
+            equippedWeapon: player.equippedWeapon || "pistol",
+            ownedWeapons: Array.from(player.ownedWeapons ?? []),
           });
         } else {
           const rv = this.remotePlayers.get(sessionId);
@@ -318,6 +375,7 @@ export class ArenaScene extends Phaser.Scene {
             rv.targetY = player.y;
             rv.targetMass = player.mass;
             rv.nameText.setText(player.name);
+            if (player.equippedWeapon) this.setGunTexture(rv.gunSprite, player.equippedWeapon);
             this.handleRemoteStateTransition(rv, player.state === "alive", player.x, player.y, player.color);
           }
         }
@@ -420,50 +478,89 @@ export class ArenaScene extends Phaser.Scene {
     border.strokeRect(0, 0, WORLD.WIDTH, WORLD.HEIGHT);
   }
 
+  /** Builds a Phaser animation out of individually-textured frames (one PNG per frame, not a spritesheet). */
+  private heroFrames(anim: string) {
+    const count = HERO_FRAME_COUNTS[anim];
+    return Array.from({ length: count }, (_, i) => ({ key: heroFrameKey(anim, i), frame: 0 }));
+  }
+
   private createAnimations() {
     if (!this.anims.exists("hero-walk")) {
-      this.anims.create({
-        key: "hero-walk",
-        frames: Array.from({ length: HERO_WALK_FRAME_COUNT }, (_, i) => ({ key: heroWalkFrameKey(i) })),
-        frameRate: 12,
-        repeat: -1,
-      });
+      this.anims.create({ key: "hero-walk", frames: this.heroFrames("Walk"), frameRate: 12, repeat: -1 });
     }
     if (!this.anims.exists("hero-idle")) {
-      this.anims.create({
-        key: "hero-idle",
-        frames: Array.from({ length: HERO_IDLE_FRAME_COUNT }, (_, i) => ({ key: heroIdleFrameKey(i) })),
-        frameRate: 8,
-        repeat: -1,
-      });
+      this.anims.create({ key: "hero-idle", frames: this.heroFrames("Idle"), frameRate: 8, repeat: -1 });
+    }
+    if (!this.anims.exists("hero-run")) {
+      this.anims.create({ key: "hero-run", frames: this.heroFrames("Run"), frameRate: 14, repeat: -1 });
+    }
+    if (!this.anims.exists("hero-slide")) {
+      this.anims.create({ key: "hero-slide", frames: this.heroFrames("Slide"), frameRate: 14, repeat: 0 });
     }
     if (!this.anims.exists("zombie-walk")) {
       this.anims.create({
         key: "zombie-walk",
-        frames: this.anims.generateFrameNumbers("zombie-idle", { start: 0, end: ZOMBIE_IDLE_FRAME_COUNT - 1 }),
-        frameRate: 8,
+        frames: this.anims.generateFrameNumbers("zombie-idle", { start: 0, end: ZOMBIE_IDLE_FRAMES - 1 }),
+        frameRate: 10,
         repeat: -1,
       });
     }
+    if (!this.anims.exists("zombie-dead")) {
+      this.anims.create({
+        key: "zombie-dead",
+        frames: this.anims.generateFrameNumbers("zombie-dead", { start: 0, end: ZOMBIE_DEAD_FRAMES - 1 }),
+        frameRate: 10,
+        repeat: 0,
+      });
+    }
+  }
+
+  /** Scales a hero sprite uniformly so HERO_DISPLAY_H stays constant across
+   * frames of differing native size, without warping aspect ratio (each
+   * frame is its own PNG at its own trimmed dimensions). */
+  private applyHeroScale(sprite: Phaser.GameObjects.Sprite) {
+    const scale = HERO_DISPLAY_H / sprite.height;
+    sprite.setScale(scale);
+  }
+
+  /** Positions/flips the small hand-gun overlay to sit at the hero's hand, mirroring facing. */
+  private positionGunSprite(gun: Phaser.GameObjects.Image, facing: number) {
+    gun.setFlipX(facing < 0);
+    gun.setPosition(GUN_OFFSET_X * facing, GUN_OFFSET_Y);
+  }
+
+  /** Swaps the hand-gun overlay's texture to match the player's currently-equipped weapon. */
+  private setGunTexture(gun: Phaser.GameObjects.Image | undefined, weaponId: string) {
+    if (!gun) return;
+    const key = gunTextureKey(weaponId);
+    if (!this.textures.exists(key)) return;
+    gun.setTexture(key);
+    gun.setDisplaySize(GUN_DISPLAY_W, GUN_DISPLAY_W * (gun.height / gun.width));
   }
 
   private createSelfVisual(x: number, y: number, mass: number, _color: number) {
     const radius = massToRadius(mass);
     this.selfShadow = this.add.ellipse(0, radius * 0.55, radius * 1.6, radius * 0.7, 0x000000, 0.25);
     this.selfSprite = this.add
-      .sprite(0, 0, heroIdleFrameKey(0))
-      .setDisplaySize(HERO_DISPLAY_W, HERO_DISPLAY_H)
+      .sprite(0, 0, heroFrameKey("Idle", 0))
       .setOrigin(0.5, 0.8)
       .play("hero-idle");
-    // The hero-walk source frames are each a different native size, so a
-    // display size set once (above) gets thrown off every time the
-    // animation switches frames — the sprite visibly grows/shrinks/warps
-    // each frame instead of looking like a clean walk cycle. Re-pin the
-    // display size on every animation frame change to keep it stable.
+    this.applyHeroScale(this.selfSprite);
+    // The source frames are each a different native size, so scale set once
+    // (above) gets thrown off every time the animation switches frames — the
+    // sprite visibly grows/shrinks each frame instead of looking like a
+    // clean cycle. Re-pin the scale on every animation frame change.
     this.selfSprite.on(Phaser.Animations.Events.ANIMATION_UPDATE, () => {
-      this.selfSprite?.setDisplaySize(HERO_DISPLAY_W, HERO_DISPLAY_H);
+      if (this.selfSprite) this.applyHeroScale(this.selfSprite);
     });
-    this.selfContainer = this.add.container(x, y, [this.selfShadow, this.selfSprite]);
+    this.selfGunSprite = this.add
+      .image(GUN_OFFSET_X, GUN_OFFSET_Y, gunTextureKey(this.selfEquippedWeapon))
+      .setOrigin(0.15, 0.5);
+    this.selfGunSprite.setDisplaySize(
+      GUN_DISPLAY_W,
+      GUN_DISPLAY_W * (this.selfGunSprite.height / this.selfGunSprite.width)
+    );
+    this.selfContainer = this.add.container(x, y, [this.selfShadow, this.selfSprite, this.selfGunSprite]);
     this.cameras.main.startFollow(this.selfContainer, true, 0.12, 0.12);
   }
 
@@ -474,32 +571,33 @@ export class ArenaScene extends Phaser.Scene {
     mass: number,
     _color: number,
     name: string,
-    alive: boolean
+    alive: boolean,
+    equippedWeapon: string = "pistol"
   ) {
     const radius = massToRadius(mass);
     const shadow = this.add.ellipse(0, radius * 0.55, radius * 1.6, radius * 0.7, 0x000000, 0.25);
-    const sprite = this.add
-      .sprite(0, 0, heroWalkFrameKey(0))
-      .setDisplaySize(HERO_DISPLAY_W, HERO_DISPLAY_H)
-      .setOrigin(0.5, 0.8)
-      .play("hero-walk");
-    // Same fix as the self sprite: keep display size stable across frames
-    // of differing native size.
+    const sprite = this.add.sprite(0, 0, heroFrameKey("Walk", 0)).setOrigin(0.5, 0.8).play("hero-walk");
+    this.applyHeroScale(sprite);
+    // Same fix as the self sprite: keep scale stable across frames of
+    // differing native size.
     sprite.on(Phaser.Animations.Events.ANIMATION_UPDATE, () => {
-      sprite.setDisplaySize(HERO_DISPLAY_W, HERO_DISPLAY_H);
+      this.applyHeroScale(sprite);
     });
+    const gunSprite = this.add.image(GUN_OFFSET_X, GUN_OFFSET_Y, gunTextureKey(equippedWeapon)).setOrigin(0.15, 0.5);
+    gunSprite.setDisplaySize(GUN_DISPLAY_W, GUN_DISPLAY_W * (gunSprite.height / gunSprite.width));
     const nameText = this.add
       .text(0, -HERO_DISPLAY_H - 10, name, { fontSize: "13px", color: "#ffffff", fontFamily: "Rubik, sans-serif" })
       .setOrigin(0.5);
     const healthBarBg = this.add.rectangle(0, -HERO_DISPLAY_H, 40, 5, 0x000000, 0.5);
     const healthBarFill = this.add.rectangle(-20, -HERO_DISPLAY_H, 40, 5, 0x2ecc71, 1).setOrigin(0, 0.5);
 
-    const container = this.add.container(x, y, [shadow, sprite, healthBarBg, healthBarFill, nameText]);
+    const container = this.add.container(x, y, [shadow, sprite, gunSprite, healthBarBg, healthBarFill, nameText]);
     container.setAlpha(alive ? 1 : 0.15);
     this.remotePlayers.set(sessionId, {
       container,
       shadow,
       sprite,
+      gunSprite,
       nameText,
       healthBarBg,
       healthBarFill,
@@ -540,8 +638,8 @@ export class ArenaScene extends Phaser.Scene {
 
   private handleZombieStateTransition(zv: ZombieVisual, alive: boolean) {
     if (zv.wasAlive && !alive) {
-      zv.sprite.stop();
-      this.tweens.add({ targets: zv.container, alpha: 0.15, duration: 250 });
+      zv.sprite.play("zombie-dead");
+      this.tweens.add({ targets: zv.container, alpha: 0.15, duration: 500, delay: 200 });
     } else if (!zv.wasAlive && alive) {
       zv.sprite.play("zombie-walk");
       this.tweens.add({ targets: zv.container, alpha: 1, duration: 250 });
@@ -673,6 +771,25 @@ export class ArenaScene extends Phaser.Scene {
     this.virtualFireHeld = held;
   }
 
+  /** Called from the on-screen Slide button (sits right beside Fire, see VirtualControls) — mirrors the desktop Shift key. */
+  virtualSlide() {
+    this.triggerSlide();
+  }
+
+  /** Shared by the Shift key and the Slide button: client-side cooldown gate
+   * + local animation feel, while the server resolves the actual dash
+   * displacement authoritatively (see ArenaRoom.handleSlide). */
+  private triggerSlide() {
+    if (!this.selfContainer) return;
+    if (this.room.state.players.get(this.sessionId)?.state !== "alive") return;
+    const now = Date.now();
+    if (now < this.nextSlideAllowedAt) return;
+    this.nextSlideAllowedAt = now + 400; // local re-trigger guard; server enforces the real cooldown
+    this.slideAnimUntil = now + 260;
+    this.room.send(MSG.SLIDE);
+    this.selfSprite?.play("hero-slide");
+  }
+
   private sendPing() {
     this.lastPingAt = Date.now();
     this.room.send(MSG.PING, this.lastPingAt);
@@ -694,6 +811,9 @@ export class ArenaScene extends Phaser.Scene {
     if (this.keys?.SPACE.isDown || this.input.activePointer.leftButtonDown() || this.virtualFireHeld) {
       this.fireBullet();
     }
+    if (this.slideKey && Phaser.Input.Keyboard.JustDown(this.slideKey)) {
+      this.triggerSlide();
+    }
 
     const selfPlayer = this.selfContainer ? this.room.state.players.get(this.sessionId) : undefined;
 
@@ -711,22 +831,28 @@ export class ArenaScene extends Phaser.Scene {
       const radius = massToRadius(selfPlayer.mass);
       this.selfShadow?.setSize(radius * 1.6, radius * 0.7).setY(radius * 0.55);
 
+      const now = Date.now();
       const isMoving = dir.x !== 0 || dir.y !== 0;
       if (isMoving) {
         this.selfFacing = dir.x < 0 ? -1 : 1;
         this.selfSprite?.setFlipX(this.selfFacing < 0);
-        if (this.selfSprite?.anims.currentAnim?.key !== "hero-walk") {
+        if (this.selfGunSprite) this.positionGunSprite(this.selfGunSprite, this.selfFacing);
+        if (now < this.slideAnimUntil) {
+          if (this.selfSprite?.anims.currentAnim?.key !== "hero-slide") this.selfSprite?.play("hero-slide");
+        } else if (this.selfSprite?.anims.currentAnim?.key !== "hero-walk") {
           this.selfSprite?.play("hero-walk");
         }
       } else {
-        if (this.selfSprite?.anims.currentAnim?.key !== "hero-idle") {
+        if (this.selfGunSprite) this.positionGunSprite(this.selfGunSprite, this.selfFacing);
+        if (now < this.slideAnimUntil) {
+          if (this.selfSprite?.anims.currentAnim?.key !== "hero-slide") this.selfSprite?.play("hero-slide");
+        } else if (this.selfSprite?.anims.currentAnim?.key !== "hero-idle") {
           this.selfSprite?.play("hero-idle");
         }
       }
 
       // Network send stays on its own fixed cadence (SIM.TICK_RATE), fully
       // decoupled from rendering above, so server load/bandwidth is unaffected.
-      const now = Date.now();
       const sendInterval = 1000 / SIM.TICK_RATE;
       if (now - this.lastSentAt >= sendInterval) {
         this.lastSentAt = now;
@@ -744,6 +870,7 @@ export class ArenaScene extends Phaser.Scene {
       if (Math.hypot(dx, dy) > 0.5) {
         const facing = dx < 0 ? -1 : 1;
         rv.sprite.setFlipX(facing < 0);
+        this.positionGunSprite(rv.gunSprite, facing);
       }
       rv.container.x = Phaser.Math.Linear(rv.container.x, rv.targetX, lerpFactor);
       rv.container.y = Phaser.Math.Linear(rv.container.y, rv.targetY, lerpFactor);

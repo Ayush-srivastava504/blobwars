@@ -94,6 +94,24 @@ export const BULLET = {
   COOLDOWN_MS: 220,
 } as const;
 
+// Coin-shop weapon catalog. "pistol" is free/starting and can't be sold back.
+// icon paths point at /public/assets/weapons/shop/*.png (used by both the
+// shop UI and the small hand-gun overlay drawn on the hero sprite).
+export const WEAPONS: import("./types").WeaponDef[] = [
+  { id: "pistol", name: "Pistol", price: 0, damage: 8, cooldownMs: 220, icon: "/assets/weapons/shop/pistol.png" },
+  { id: "glock18", name: "Glock 18", price: 150, damage: 11, cooldownMs: 190, icon: "/assets/weapons/shop/glock18.png" },
+  { id: "deagle", name: "Desert Eagle", price: 350, damage: 22, cooldownMs: 320, icon: "/assets/weapons/shop/deagle.png" },
+  { id: "tmp", name: "TMP Machine Pistol", price: 500, damage: 7, cooldownMs: 90, icon: "/assets/weapons/shop/tmp.png" },
+  { id: "aug", name: "AUG Rifle", price: 900, damage: 14, cooldownMs: 140, icon: "/assets/weapons/shop/aug.png" },
+  { id: "barret", name: "Barret .50cal", price: 1600, damage: 45, cooldownMs: 650, icon: "/assets/weapons/shop/barret.png" },
+];
+
+export const SLIDE = {
+  DISTANCE: 150,
+  COOLDOWN_MS: 1400,
+  DURATION_MS: 260,
+} as const;
+
 export const WAVE = {
   BASE_COUNT: 5,
   COUNT_GROWTH_PER_WAVE: 3,

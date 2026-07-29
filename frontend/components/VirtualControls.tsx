@@ -19,17 +19,20 @@ export function VirtualControls({
   onMoveEnd,
   onFire,
   onFireHeld,
+  onSlide,
 }: {
   onMove: (dir: { x: number; y: number }) => void;
   onMoveEnd: () => void;
   onFire: () => void;
   onFireHeld: (held: boolean) => void;
+  onSlide: () => void;
 }) {
   const baseRef = useRef<HTMLDivElement>(null);
   const activePointerId = useRef<number | null>(null);
   const [knobOffset, setKnobOffset] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
   const [firing, setFiring] = useState(false);
+  const [sliding, setSliding] = useState(false);
 
   const updateFromPointer = useCallback((clientX: number, clientY: number) => {
     const base = baseRef.current;
@@ -94,6 +97,16 @@ export function VirtualControls({
     onFireHeld(false);
   }, [onFireHeld]);
 
+  const handleSlideTap = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => {
+      e.preventDefault();
+      onSlide();
+      setSliding(true);
+      window.setTimeout(() => setSliding(false), 180);
+    },
+    [onSlide]
+  );
+
   return (
     <div className="pointer-events-none absolute inset-0 z-20 select-none [touch-action:none]">
       {/* Joystick */}
@@ -120,6 +133,19 @@ export function VirtualControls({
           }}
         />
       </div>
+
+      {/* Slide button — sits just to the left of Fire so a thumb can reach both. */}
+      <button
+        onPointerDown={handleSlideTap}
+        onContextMenu={(e) => e.preventDefault()}
+        className={`pointer-events-auto absolute bottom-14 right-32 w-14 h-14 rounded-full border-2 flex items-center justify-center text-xl font-bold [touch-action:none] transition-colors ${
+          sliding ? "bg-arena-accent border-arena-accent/70 scale-95" : "bg-arena-accent/70 border-white/20"
+        }`}
+        style={{ transition: "transform 80ms, background-color 80ms" }}
+        aria-label="Slide"
+      >
+        💨
+      </button>
 
       {/* Fire button */}
       <button

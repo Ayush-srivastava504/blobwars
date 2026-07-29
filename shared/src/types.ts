@@ -37,6 +37,8 @@ export interface PlayerSnapshot {
   kills: number;
   score: number;
   lastProcessedInputSeq: number;
+  equippedWeapon: string;
+  ownedWeapons: string[];
 }
 
 export interface FoodSnapshot {
@@ -77,6 +79,19 @@ export const MSG = {
   PING: "ping",
   KILLED: "killed",
   KILL_FEED: "killFeed",
+  SLIDE: "slide",
+  BUY_WEAPON: "buyWeapon",
+  EQUIP_WEAPON: "equipWeapon",
+  SHOP_ERROR: "shopError",
 } as const;
 
 export type MsgType = (typeof MSG)[keyof typeof MSG];
+
+export interface WeaponDef {
+  id: string;
+  name: string;
+  price: number;
+  damage: number;
+  cooldownMs: number;
+  icon: string;
+}

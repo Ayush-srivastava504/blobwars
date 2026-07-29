@@ -18,6 +18,8 @@ import {
   ZOMBIE,
   WAVE,
   BULLET,
+  WEAPONS,
+  SLIDE,
   stepPosition,
   massToRadius,
   circlesOverlap,
@@ -28,6 +30,10 @@ import { recordMatchPlayerResult } from "../db/matchRepository";
 
 interface PendingInput extends InputMessage {}
 
+function getWeapon(id: string) {
+  return WEAPONS.find((w) => w.id === id) ?? WEAPONS[0];
+}
+
 const COLORS = [0xe74c3c, 0x3498db, 0x2ecc71, 0xf1c40f, 0x9b59b6, 0x1abc9c, 0xe67e22, 0xecf0f1];
 
 export class ArenaRoom extends Room<ArenaState> {
@@ -36,6 +42,7 @@ export class ArenaRoom extends Room<ArenaState> {
   private inputQueues = new Map<string, PendingInput[]>();
   private lastDir = new Map<string, { x: number; y: number }>();
   private nextShotAllowedAt = new Map<string, number>();
+  private nextSlideAllowedAt = new Map<string, number>();
   private matchId: string | null = null;
   private colorCursor = 0;
   private bulletSpawnedAt = new Map<string, number>();
@@ -70,6 +77,18 @@ export class ArenaRoom extends Room<ArenaState> {
 
     this.onMessage(MSG.PING, (client, ts: number) => {
       client.send(MSG.PONG, ts);
+    });
+
+    this.onMessage(MSG.BUY_WEAPON, (client, weaponId: string) => {
+      this.handleBuyWeapon(client, weaponId);
+    });
+
+    this.onMessage(MSG.EQUIP_WEAPON, (client, weaponId: string) => {
+      this.handleEquipWeapon(client, weaponId);
+    });
+
+    this.onMessage(MSG.SLIDE, (client) => {
+      this.handleSlide(client.sessionId);
     });
 
     const dt = 1000 / SIM.TICK_RATE;
@@ -133,11 +152,14 @@ export class ArenaRoom extends Room<ArenaState> {
     player.maxHealth = PLAYER.MAX_HEALTH;
     player.state = "alive";
     player.spawnProtectedUntil = Date.now() + PLAYER.INVULNERABLE_MS_AFTER_SPAWN;
+    player.equippedWeapon = "pistol";
+    // ownedWeapons already defaults to ["pistol"] from the schema field init.
 
     this.state.players.set(client.sessionId, player);
     this.inputQueues.set(client.sessionId, []);
     this.lastDir.set(client.sessionId, { x: 0, y: 0 });
     this.nextShotAllowedAt.set(client.sessionId, 0);
+    this.nextSlideAllowedAt.set(client.sessionId, 0);
   }
 
   private placeAtSpawn(player: PlayerSchema) {
@@ -171,6 +193,7 @@ export class ArenaRoom extends Room<ArenaState> {
     this.inputQueues.delete(client.sessionId);
     this.lastDir.delete(client.sessionId);
     this.nextShotAllowedAt.delete(client.sessionId);
+    this.nextSlideAllowedAt.delete(client.sessionId);
   }
 
   onDispose() {
@@ -251,10 +274,11 @@ export class ArenaRoom extends Room<ArenaState> {
     const player = this.state.players.get(sessionId);
     if (!player || player.state !== "alive") return;
 
+    const weapon = getWeapon(player.equippedWeapon);
     const now = Date.now();
     const allowedAt = this.nextShotAllowedAt.get(sessionId) ?? 0;
     if (now < allowedAt) return;
-    this.nextShotAllowedAt.set(sessionId, now + BULLET.COOLDOWN_MS);
+    this.nextShotAllowedAt.set(sessionId, now + weapon.cooldownMs);
 
     const len = Math.hypot(message.dirX, message.dirY) || 1;
     const dirX = message.dirX / len;
@@ -268,8 +292,78 @@ export class ArenaRoom extends Room<ArenaState> {
     bullet.y = player.y + dirY * (radius + 4);
     bullet.dirX = dirX;
     bullet.dirY = dirY;
+    bullet.damage = weapon.damage;
     this.state.bullets.set(bullet.id, bullet);
     this.bulletSpawnedAt.set(bullet.id, now);
+  }
+
+  // ---- Coin shop: buy/equip guns with coins earned from zombie kills ----
+
+  private handleBuyWeapon(client: Client, weaponId: string) {
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+    const weapon = WEAPONS.find((w) => w.id === weaponId);
+    if (!weapon) return;
+
+    if (player.ownedWeapons.includes(weapon.id)) {
+      // Already owned — just equip it instead of erroring.
+      player.equippedWeapon = weapon.id;
+      return;
+    }
+    if (player.coins < weapon.price) {
+      client.send(MSG.SHOP_ERROR, { reason: "not_enough_coins", weaponId: weapon.id });
+      return;
+    }
+
+    player.coins -= weapon.price;
+    player.ownedWeapons.push(weapon.id);
+    player.equippedWeapon = weapon.id;
+  }
+
+  private handleEquipWeapon(client: Client, weaponId: string) {
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+    if (!player.ownedWeapons.includes(weaponId)) return;
+    player.equippedWeapon = weaponId;
+  }
+
+  // ---- Slide/dash mobility move (bound to the on-screen Slide button /
+  // desktop Shift key alongside Fire — see VirtualControls + ArenaScene) ----
+
+  private handleSlide(sessionId: string) {
+    const player = this.state.players.get(sessionId);
+    if (!player || player.state !== "alive") return;
+
+    const now = Date.now();
+    const allowedAt = this.nextSlideAllowedAt.get(sessionId) ?? 0;
+    if (now < allowedAt) return;
+    this.nextSlideAllowedAt.set(sessionId, now + SLIDE.COOLDOWN_MS);
+
+    const dir = this.lastDir.get(sessionId) ?? { x: 0, y: 0 };
+    const len = Math.hypot(dir.x, dir.y);
+    const dirX = len > 0.01 ? dir.x / len : 1;
+    const dirY = len > 0.01 ? dir.y / len : 0;
+
+    const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+    let nx = player.x + dirX * SLIDE.DISTANCE;
+    let ny = player.y + dirY * SLIDE.DISTANCE;
+    const radius = massToRadius(player.mass);
+    nx = clamp(nx, WORLD.BOUNDARY_PADDING + radius, WORLD.WIDTH - WORLD.BOUNDARY_PADDING - radius);
+    ny = clamp(ny, WORLD.BOUNDARY_PADDING + radius, WORLD.HEIGHT - WORLD.BOUNDARY_PADDING - radius);
+
+    for (const obstacle of this.state.obstacles.values()) {
+      if (circlesOverlap(nx, ny, radius, obstacle.x, obstacle.y, obstacle.radius)) {
+        const dx = nx - obstacle.x;
+        const dy = ny - obstacle.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        const overlap = radius + obstacle.radius - dist;
+        nx += (dx / dist) * overlap;
+        ny += (dy / dist) * overlap;
+      }
+    }
+
+    player.x = nx;
+    player.y = ny;
   }
 
   private updateBullets(dtSeconds: number) {
@@ -308,7 +402,7 @@ export class ArenaRoom extends Room<ArenaState> {
         if (zombie.state !== "alive") continue;
         if (!circlesOverlap(bullet.x, bullet.y, BULLET.RADIUS, zombie.x, zombie.y, ZOMBIE.RADIUS)) continue;
 
-        zombie.health = Math.max(0, zombie.health - BULLET.DAMAGE);
+        zombie.health = Math.max(0, zombie.health - bullet.damage);
         this.removeBullet(bulletId);
         if (zombie.health <= 0) {
           this.killZombie(zombieId, bullet.ownerId);

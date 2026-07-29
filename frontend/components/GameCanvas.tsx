@@ -8,12 +8,14 @@
 import { useEffect, useRef, useState } from "react";
 import type { Room } from "colyseus.js";
 import type Phaser from "phaser";
+import { MSG } from "@blobwars/shared";
 import { StatusBars } from "./StatusBars";
 import { Scoreboard } from "./Scoreboard";
 import { Minimap, MinimapData } from "./Minimap";
 import { PerfIndicators } from "./PerfIndicators";
 import { KillFeed, DeathOverlay } from "./KillFeedAndDeath";
 import { VirtualControls } from "./VirtualControls";
+import { Shop } from "./Shop";
 import { setSfxMuted } from "../lib/sfx";
 
 export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void }) {
@@ -31,7 +33,10 @@ export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void })
     score: 0,
     coins: 0,
     state: "alive",
+    equippedWeapon: "pistol",
+    ownedWeapons: ["pistol"] as string[],
   });
+  const [shopOpen, setShopOpen] = useState(false);
   const [scoreboard, setScoreboard] = useState<{ id: string; name: string; score: number; kills: number }[]>([]);
   const [ping, setPing] = useState(0);
   const [fps, setFps] = useState(60);
@@ -147,6 +152,24 @@ export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void })
         onMoveEnd={() => getArenaScene()?.clearVirtualMove?.()}
         onFire={() => getArenaScene()?.virtualFire?.()}
         onFireHeld={(held) => getArenaScene()?.setVirtualFireHeld?.(held)}
+        onSlide={() => getArenaScene()?.virtualSlide?.()}
+      />
+
+      <button
+        onClick={() => setShopOpen(true)}
+        className="absolute top-1/2 -translate-y-1/2 right-4 px-3 py-2 rounded-lg bg-arena-panel/80 backdrop-blur border border-white/10 text-xs font-semibold text-white/80 hover:text-white hover:bg-yellow-500/30 transition-colors flex items-center gap-1.5 z-20"
+      >
+        🛒 Shop
+      </button>
+
+      <Shop
+        open={shopOpen}
+        coins={self.coins}
+        ownedWeapons={self.ownedWeapons}
+        equippedWeapon={self.equippedWeapon}
+        onBuy={(weaponId) => room.send(MSG.BUY_WEAPON, weaponId)}
+        onEquip={(weaponId) => room.send(MSG.EQUIP_WEAPON, weaponId)}
+        onClose={() => setShopOpen(false)}
       />
 
       <button
