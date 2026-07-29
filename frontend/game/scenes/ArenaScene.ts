@@ -3,14 +3,14 @@
 // Handles client-side prediction/reconciliation, remote interpolation,
 // shadows/animations/particles/SFX polish.
 // Input: on desktop, WASD/arrows move, the mouse aims, spacebar/held-click
-// fires. On touch devices, tapping/dragging anywhere on the canvas sets a
-// run direction (the character keeps running that way until the next tap)
-// and each tap also fires a shot toward it. On top of that, GameCanvas
-// overlays an on-screen joystick + fire button (see VirtualControls.tsx)
-// that drives the character through the small public API at the bottom of
-// this class (setVirtualMove/clearVirtualMove/virtualFire/setVirtualFireHeld) —
-// all three input paths (keyboard, canvas tap/drag, HUD joystick) feed the
-// same getInputDirection()/fireBullet() so none of them can conflict.
+// fires. Tapping/clicking anywhere on the canvas aims toward that point and
+// fires a shot, but does NOT move the character — movement is WASD/arrows
+// on desktop and the on-screen joystick on touch. GameCanvas overlays an
+// on-screen joystick + fire button (see VirtualControls.tsx) that drives
+// the character through the small public API at the bottom of this class
+// (setVirtualMove/clearVirtualMove/virtualFire/setVirtualFireHeld) — all
+// input paths (keyboard, canvas tap aim/fire, HUD joystick) feed the same
+// getInputDirection()/fireBullet() so none of them can conflict.
 import * as Phaser from "phaser";
 import { Room, getStateCallbacks } from "colyseus.js";
 import {
@@ -157,9 +157,6 @@ export class ArenaScene extends Phaser.Scene {
   private fpsAccum = 0;
   private fpsFrames = 0;
 
-  // Touch: set by tapping/dragging on the canvas, and kept (not reset) until
-  // the next tap changes it, so the character keeps running that direction.
-  private autoRunDir = { x: 0, y: 0 };
   // Desktop controls: WASD/arrow keys for movement, mouse position for aim,
   // spacebar or left-click (held) to fire. Fully independent of the touch
   // joystick/fire button so desktop play never depends on pointer-capture
@@ -182,15 +179,14 @@ export class ArenaScene extends Phaser.Scene {
 
   // On-screen virtual joystick (mobile HUD overlay in GameCanvas). Set via
   // setVirtualMove() every time the stick is dragged, and cleared to {0,0}
-  // on release. Read by getInputDirection() with the same priority as the
-  // touch auto-run direction, so it "just works" alongside every other
-  // input method already in this file.
+  // on release. Read directly by getInputDirection() — the sole source of
+  // movement on touch devices, since there's no auto-run.
   private virtualMoveDir = { x: 0, y: 0 };
   private virtualFireHeld = false;
   // True whenever the on-screen joystick is actively being pushed. Used to
-  // suppress the canvas-wide tap-to-run/fire handler below, so a touch that
+  // suppress the canvas-wide tap-to-fire handler below, so a touch that
   // lands on (or leaks through from) the joystick can never also register
-  // as a canvas tap and fire a bullet / redirect run-direction.
+  // as a canvas tap and fire a bullet.
   private virtualControlActive = false;
 
   constructor() {
@@ -235,39 +231,37 @@ export class ArenaScene extends Phaser.Scene {
     this.drawGrid();
     this.createAnimations();
 
-    // Movement/aim/fire, unified across mouse and touch:
-    // - Moving the pointer while NOT pressed just aims (desktop mouse-look).
-    // - Pressing (click or tap) sets the run direction toward that point
-    //   (character keeps running that way until the next press) and fires
-    //   immediately.
-    // - Dragging while pressed keeps steering the run direction.
-    // WASD/arrow keys, if held, override the run direction (see
-    // getInputDirection()).
+    // Aim/fire, unified across mouse and touch — movement is handled
+    // entirely separately (WASD/arrows on desktop, the on-screen joystick
+    // on touch; see getInputDirection()):
+    // - Moving the pointer always updates the aim direction (desktop
+    //   mouse-look), whether or not a button is held.
+    // - Pressing (click or tap) fires immediately toward that point, but
+    //   never changes movement.
     if (this.input.keyboard) {
       this.keys = this.input.keyboard.addKeys("W,A,S,D,UP,LEFT,DOWN,RIGHT,SPACE") as any;
       this.slideKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
     }
-    const updateAimFromPointer = (pointer: Phaser.Input.Pointer, alsoSetRunDirection: boolean) => {
+    const updateAimFromPointer = (pointer: Phaser.Input.Pointer) => {
       if (!this.selfContainer) return;
       const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
       const dx = worldPoint.x - this.selfContainer.x;
       const dy = worldPoint.y - this.selfContainer.y;
       const len = Math.hypot(dx, dy);
       if (len > 1) {
-        const dir = { x: dx / len, y: dy / len };
-        this.aimDir = dir;
-        if (alsoSetRunDirection) this.autoRunDir = dir;
+        this.aimDir = { x: dx / len, y: dy / len };
       }
     };
     this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
-      updateAimFromPointer(pointer, pointer.isDown);
+      updateAimFromPointer(pointer);
     });
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
       // Ignore canvas taps while the on-screen joystick/fire button is in
       // use, so touching the joystick can never also register as a
-      // canvas tap-to-fire/tap-to-run.
+      // canvas tap-to-fire. Movement is never driven from here — only
+      // aiming + firing — so this can't interfere with WASD or the joystick.
       if (this.virtualControlActive || this.virtualFireHeld) return;
-      updateAimFromPointer(pointer, true);
+      updateAimFromPointer(pointer);
       this.fireBullet();
     });
 
@@ -523,10 +517,21 @@ export class ArenaScene extends Phaser.Scene {
     sprite.setScale(scale);
   }
 
-  /** Positions/flips the small hand-gun overlay to sit at the hero's hand, mirroring facing. */
-  private positionGunSprite(gun: Phaser.GameObjects.Image, facing: number) {
-    gun.setFlipX(facing < 0);
-    gun.setPosition(GUN_OFFSET_X * facing, GUN_OFFSET_Y);
+  /** Positions/rotates the small hand-gun overlay so its muzzle actually
+   * points toward (dirX, dirY) — previously this only flipped the gun
+   * left/right with the body and left its rotation fixed, so the barrel
+   * pointed at a constant angle instead of toward the aim/movement
+   * direction. Flipping vertically past the +/-90 degree mark keeps the
+   * gun right-side-up instead of upside-down when aiming to the left. */
+  private positionGunSprite(gun: Phaser.GameObjects.Image, dirX: number, dirY: number) {
+    const len = Math.hypot(dirX, dirY) || 1;
+    const nx = dirX / len;
+    const ny = dirY / len;
+    const angle = Math.atan2(ny, nx);
+    const facingLeft = Math.abs(angle) > Math.PI / 2;
+    gun.setPosition(GUN_OFFSET_X * (facingLeft ? -1 : 1), GUN_OFFSET_Y);
+    gun.setRotation(angle);
+    gun.setFlipY(facingLeft);
   }
 
   /** Swaps the hand-gun overlay's texture to match the player's currently-equipped weapon. */
@@ -726,13 +731,9 @@ export class ArenaScene extends Phaser.Scene {
         return { x: x / len, y: y / len };
       }
     }
-    // On-screen joystick takes priority over the tap-to-run direction
-    // whenever it's actively being pushed (non-zero), since it means the
-    // player is actively steering with a thumb right now.
-    if (this.virtualMoveDir.x !== 0 || this.virtualMoveDir.y !== 0) {
-      return this.virtualMoveDir;
-    }
-    return this.autoRunDir;
+    // On-screen joystick (mobile HUD). No keyboard input and no joystick
+    // input means the character stays put — there is no auto-run.
+    return this.virtualMoveDir;
   }
 
   // ---- Public API for the on-screen joystick + fire button HUD (see
@@ -743,13 +744,10 @@ export class ArenaScene extends Phaser.Scene {
   setVirtualMove(dir: { x: number; y: number }) {
     this.virtualMoveDir = dir;
     this.virtualControlActive = true;
-    // Only update aim here, NOT autoRunDir. getInputDirection() already gives
-    // virtualMoveDir priority over autoRunDir, so mirroring the joystick
-    // direction into autoRunDir served no purpose for movement — but it did
-    // mean clearVirtualMove() (which only zeroes virtualMoveDir) left
-    // autoRunDir stuck at the last joystick direction, so releasing the
-    // stick never stopped the character: getInputDirection() would fall
-    // through to that stale autoRunDir and keep running forever.
+    // Only update aim here. Movement direction is virtualMoveDir itself,
+    // read directly by getInputDirection(), and clearVirtualMove() zeroes
+    // it on release so the character always stops the instant the stick
+    // is let go.
     if (dir.x !== 0 || dir.y !== 0) {
       this.aimDir = dir;
     }
@@ -836,14 +834,14 @@ export class ArenaScene extends Phaser.Scene {
       if (isMoving) {
         this.selfFacing = dir.x < 0 ? -1 : 1;
         this.selfSprite?.setFlipX(this.selfFacing < 0);
-        if (this.selfGunSprite) this.positionGunSprite(this.selfGunSprite, this.selfFacing);
+        if (this.selfGunSprite) this.positionGunSprite(this.selfGunSprite, this.aimDir.x, this.aimDir.y);
         if (now < this.slideAnimUntil) {
           if (this.selfSprite?.anims.currentAnim?.key !== "hero-slide") this.selfSprite?.play("hero-slide");
         } else if (this.selfSprite?.anims.currentAnim?.key !== "hero-walk") {
           this.selfSprite?.play("hero-walk");
         }
       } else {
-        if (this.selfGunSprite) this.positionGunSprite(this.selfGunSprite, this.selfFacing);
+        if (this.selfGunSprite) this.positionGunSprite(this.selfGunSprite, this.aimDir.x, this.aimDir.y);
         if (now < this.slideAnimUntil) {
           if (this.selfSprite?.anims.currentAnim?.key !== "hero-slide") this.selfSprite?.play("hero-slide");
         } else if (this.selfSprite?.anims.currentAnim?.key !== "hero-idle") {
@@ -868,9 +866,8 @@ export class ArenaScene extends Phaser.Scene {
       const dx = rv.targetX - rv.container.x;
       const dy = rv.targetY - rv.container.y;
       if (Math.hypot(dx, dy) > 0.5) {
-        const facing = dx < 0 ? -1 : 1;
-        rv.sprite.setFlipX(facing < 0);
-        this.positionGunSprite(rv.gunSprite, facing);
+        rv.sprite.setFlipX(dx < 0);
+        this.positionGunSprite(rv.gunSprite, dx, dy);
       }
       rv.container.x = Phaser.Math.Linear(rv.container.x, rv.targetX, lerpFactor);
       rv.container.y = Phaser.Math.Linear(rv.container.y, rv.targetY, lerpFactor);

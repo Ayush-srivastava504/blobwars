@@ -9,6 +9,7 @@ import { prisma } from "../db/prisma";
 import { signSessionToken, verifySessionToken } from "../auth/jwt";
 import { verifyGoogleIdToken } from "../auth/googleAuth";
 import { ROOM } from "@blobwars/shared";
+import { addMessage, getRecentMessages } from "./chatStore";
 
 export const router = Router();
 
@@ -114,6 +115,21 @@ router.get("/rooms/code/:code", async (req, res) => {
   } catch {
     res.status(500).json({ error: "lookup_failed" });
   }
+});
+
+// Global lobby chat: messages are kept in memory for 1 minute only (see
+// chatStore.ts). The lobby page polls GET /chat/messages so old messages
+// simply stop being returned once they expire — nothing to delete client-side.
+router.get("/chat/messages", (_req, res) => {
+  res.json(getRecentMessages());
+});
+
+router.post("/chat/send", (req, res) => {
+  const username = req.body?.username;
+  const text = req.body?.text;
+  const message = addMessage(username, text);
+  if (!message) return res.status(400).json({ error: "invalid_message" });
+  res.json({ message });
 });
 
 router.get("/health", (_req, res) => res.json({ status: "ok", ts: Date.now() }));

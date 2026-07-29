@@ -18,6 +18,7 @@ import {
 } from "@/lib/session";
 import { joinPublicArena, joinRoomById } from "@/lib/colyseusClient";
 import { GameCanvas } from "@/components/GameCanvas";
+import { GlobalChat } from "@/components/GlobalChat";
 
 declare global {
   interface Window {
@@ -237,6 +238,8 @@ export default function LobbyPage() {
               </ul>
             )}
           </div>
+
+          <GlobalChat username={user.username} />
         </div>
       )}
 
