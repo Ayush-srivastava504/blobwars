@@ -159,6 +159,8 @@ export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void })
         <VirtualControls
           onMove={(dir) => getArenaScene()?.setVirtualMove?.(dir)}
           onMoveEnd={() => getArenaScene()?.clearVirtualMove?.()}
+          onAim={(dir) => getArenaScene()?.setVirtualAim?.(dir)}
+          onAimEnd={() => getArenaScene()?.clearVirtualAim?.()}
           onFire={() => getArenaScene()?.virtualFire?.()}
           onFireHeld={(held) => getArenaScene()?.setVirtualFireHeld?.(held)}
           onSlide={() => getArenaScene()?.virtualSlide?.()}

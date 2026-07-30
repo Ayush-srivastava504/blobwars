@@ -222,6 +222,11 @@ export class ArenaScene extends Phaser.Scene {
   // lands on (or leaks through from) the joystick can never also register
   // as a canvas tap and fire a bullet.
   private virtualControlActive = false;
+  // True whenever the on-screen aim/fire stick (see VirtualControls) is
+  // actively being pushed. While true it takes over aimDir entirely, so
+  // dragging the move-stick at the same time can't fight it for control of
+  // where the gun points — see setVirtualMove()/setVirtualAim() below.
+  private virtualAimActive = false;
 
   constructor() {
     super("ArenaScene");
@@ -957,11 +962,14 @@ export class ArenaScene extends Phaser.Scene {
   setVirtualMove(dir: { x: number; y: number }) {
     this.virtualMoveDir = dir;
     this.virtualControlActive = true;
-    // Only update aim here. Movement direction is virtualMoveDir itself,
-    // read directly by getInputDirection(), and clearVirtualMove() zeroes
-    // it on release so the character always stops the instant the stick
-    // is let go.
-    if (dir.x !== 0 || dir.y !== 0) {
+    // Only update aim here if the dedicated aim/fire stick isn't already
+    // being held — otherwise walking with the left stick while aiming with
+    // the right one would keep yanking the gun back to face the walk
+    // direction every frame, fighting the player's actual aim input.
+    // Movement direction is virtualMoveDir itself, read directly by
+    // getInputDirection(), and clearVirtualMove() zeroes it on release so
+    // the character always stops the instant the stick is let go.
+    if (!this.virtualAimActive && (dir.x !== 0 || dir.y !== 0)) {
       this.aimDir = dir;
     }
   }
@@ -980,6 +988,24 @@ export class ArenaScene extends Phaser.Scene {
   /** Called on fire-button pointerdown/pointerup so holding it fires continuously, matching desktop spacebar behavior. */
   setVirtualFireHeld(held: boolean) {
     this.virtualFireHeld = held;
+  }
+
+  /** Called continuously while the on-screen aim/fire stick (bottom-right,
+   * see VirtualControls) is dragged. Unlike the move-stick, pushing this
+   * one doesn't move the player at all — it only points the gun, exactly
+   * like desktop mouse-aim, so you can walk one way and shoot another. */
+  setVirtualAim(dir: { x: number; y: number }) {
+    this.virtualAimActive = true;
+    if (dir.x !== 0 || dir.y !== 0) {
+      this.aimDir = dir;
+    }
+  }
+
+  /** Called when the aim/fire stick is released. Deliberately leaves
+   * aimDir/the gun pointed at its last direction (matching the old Fire
+   * button's behavior) rather than snapping it back to anything. */
+  clearVirtualAim() {
+    this.virtualAimActive = false;
   }
 
   /** Called from the on-screen Slide button (sits right beside Fire, see VirtualControls) — mirrors the desktop Shift key. */
