@@ -76,6 +76,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             gtag('config', 'G-M2RM89PDNW');
           `}
         </Script>
+
+        {/* Google AdSense loader — publisher id matches public/ads.txt */}
+        <Script
+          async
+          src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5594205569635986"
+          crossOrigin="anonymous"
+          strategy="afterInteractive"
+        />
       </head>
       <body className="font-game text-white bg-arena-bg">{children}</body>
     </html>

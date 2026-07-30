@@ -19,6 +19,7 @@ import {
 import { joinPublicArena, joinRoomById } from "@/lib/colyseusClient";
 import { GameCanvas } from "@/components/GameCanvas";
 import { GlobalChat } from "@/components/GlobalChat";
+import { AdBanner } from "@/components/AdBanner";
 import { isTouchDevice } from "@/lib/device";
 
 declare global {
@@ -144,6 +145,10 @@ export default function LobbyPage() {
       <p className="text-white/50 mb-6 sm:mb-10 text-sm sm:text-base text-center px-2">
         Real-time multiplayer arena — eat, grow, survive.
       </p>
+
+      <div className="w-full max-w-md mb-6 sm:mb-10">
+        <AdBanner />
+      </div>
 
       {!user ? (
         <div className="w-full max-w-sm bg-arena-panel rounded-xl border border-white/10 p-6 space-y-4">
