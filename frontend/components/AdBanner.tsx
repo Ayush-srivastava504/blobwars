@@ -1,8 +1,5 @@
 // Google AdSense display unit, shown in the lobby (not during gameplay,
 // so it never overlaps the canvas or controls).
-// IMPORTANT: `adSlot` below is a placeholder. Create a real ad unit in your
-// AdSense dashboard (Ads > By ad unit > Display ads) and paste its slot ID
-// in for `adSlot`, otherwise Google will not serve real ads in this spot.
 "use client";
 
 import { useEffect, useRef } from "react";
@@ -16,7 +13,7 @@ declare global {
 const ADSENSE_CLIENT = "ca-pub-5594205569635986"; // matches public/ads.txt
 
 export function AdBanner({
-  adSlot = "0000000000", // TODO: replace with your real AdSense ad unit slot ID
+  adSlot = "4415938444",
   className = "",
   format = "auto",
 }: {
