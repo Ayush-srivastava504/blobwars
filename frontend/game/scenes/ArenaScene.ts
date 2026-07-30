@@ -725,7 +725,7 @@ export class ArenaScene extends Phaser.Scene {
     const angle = Math.atan2(ny, nx);
     const facingLeft = Math.abs(angle) > Math.PI / 2;
     gun.setPosition(GUN_OFFSET_X, GUN_OFFSET_Y);
-    gun.setRotation(angle);
+    gun.setRotation(angle + Math.PI);
     gun.setFlipY(facingLeft);
   }
 
