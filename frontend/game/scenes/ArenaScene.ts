@@ -97,7 +97,7 @@ const ZOMBIE_DEAD_FRAMES = 5; // Dead.png = 480/96
 // the head, i.e. (0.45 - 0.8) * HERO_DISPLAY_H above the sprite's local
 // origin — hence the offset below is derived from HERO_DISPLAY_H rather
 // than a hardcoded guess, so it stays correct if that constant changes.
-const GUN_DISPLAY_W = 96; // bumped up again from 66 per request for even bigger, more visible guns
+const GUN_DISPLAY_W = 20; // reduced per request for a smaller, less obtrusive weapon overlay
 const GUN_OFFSET_X = 12;
 const GUN_OFFSET_Y = (0.45 - 0.8) * HERO_DISPLAY_H;
 function gunTextureKey(weaponId: string) {
