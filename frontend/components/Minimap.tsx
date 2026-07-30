@@ -10,6 +10,7 @@ import { WORLD } from "@blobwars/shared";
 export interface MinimapData {
   self: { x: number; y: number };
   others: { x: number; y: number; color: number }[];
+  crates: { x: number; y: number }[];
 }
 
 export function Minimap({ data, raised }: { data: MinimapData | null; raised?: boolean }) {
@@ -32,6 +33,20 @@ export function Minimap({ data, raised }: { data: MinimapData | null; raised?: b
       mx: (x / WORLD.WIDTH) * SIZE,
       my: (y / WORLD.HEIGHT) * SIZE,
     });
+
+    // Supply crates — green dots with a soft glow so they stand out from
+    // player dots even at the minimap's small size.
+    for (const c of data.crates ?? []) {
+      const { mx, my } = toMap(c.x, c.y);
+      ctx.fillStyle = "rgba(46, 204, 113, 0.35)";
+      ctx.beginPath();
+      ctx.arc(mx, my, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#2ecc71";
+      ctx.beginPath();
+      ctx.arc(mx, my, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     for (const o of data.others) {
       const { mx, my } = toMap(o.x, o.y);

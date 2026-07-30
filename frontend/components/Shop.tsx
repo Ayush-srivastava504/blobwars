@@ -55,9 +55,9 @@ export function Shop({
                   equipped ? "border-arena-accent bg-arena-accent/10" : "border-white/10 bg-black/20"
                 }`}
               >
-                <div className="w-16 h-16 flex items-center justify-center">
+                <div className="w-24 h-24 sm:w-28 sm:h-28 flex items-center justify-center">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={weapon.icon} alt={weapon.name} className="max-w-full max-h-full object-contain" />
+                  <img src={weapon.icon} alt={weapon.name} className="w-full h-full object-contain drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]" />
                 </div>
                 <div className="text-xs font-semibold text-white text-center leading-tight">{weapon.name}</div>
                 <div className="text-[11px] text-white/60">

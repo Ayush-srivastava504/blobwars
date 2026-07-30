@@ -79,7 +79,7 @@ export function GameCanvas({ room, onExit }: { room: Room; onExit: () => void })
         onScoreboard: setScoreboard,
         onPing: setPing,
         onFps: setFps,
-        onMinimap: (selfPos, others) => setMinimap({ self: selfPos, others }),
+        onMinimap: (selfPos, others, crates) => setMinimap({ self: selfPos, others, crates }),
         onWaveUpdate: setWaveInfo,
         onKilled: (byName) => setDeathInfo({ byName }),
         onKillFeed: (text) =>

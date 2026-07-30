@@ -8,11 +8,33 @@
 // correctly even if the finger/cursor slides outside the joystick base.
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
+// Base sizes target ~375px-wide phones; shrunk further on very narrow
+// screens (see useResponsiveScale) and unchanged on larger phones/tablets.
 const BASE_SIZE = 116; // px, outer joystick ring
 const KNOB_SIZE = 52; // px, draggable knob
-const MAX_OFFSET = (BASE_SIZE - KNOB_SIZE) / 2; // how far the knob can travel from center
+
+/** Scales control sizing down on narrow screens (e.g. small phones in
+ * portrait) so the joystick/buttons don't crowd the visible arena, and
+ * keeps full size everywhere else. Recomputed on resize/orientation change. */
+function useResponsiveScale() {
+  const [scale, setScale] = useState(1);
+  useEffect(() => {
+    const compute = () => {
+      const w = window.innerWidth;
+      setScale(w < 360 ? 0.8 : w < 400 ? 0.9 : 1);
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    window.addEventListener("orientationchange", compute);
+    return () => {
+      window.removeEventListener("resize", compute);
+      window.removeEventListener("orientationchange", compute);
+    };
+  }, []);
+  return scale;
+}
 
 export function VirtualControls({
   onMove,
@@ -40,6 +62,15 @@ export function VirtualControls({
   const [firing, setFiring] = useState(false);
   const [sliding, setSliding] = useState(false);
   const [aimingBomb, setAimingBomb] = useState(false);
+  const scale = useResponsiveScale();
+
+  // Effective pixel sizes for this render, scaled for small screens.
+  const baseSize = Math.round(BASE_SIZE * scale);
+  const knobSize = Math.round(KNOB_SIZE * scale);
+  const maxOffset = (baseSize - knobSize) / 2;
+  const fireSize = Math.round(80 * scale);
+  const slideSize = Math.round(56 * scale);
+  const bombSize = Math.round(56 * scale);
 
   const updateFromPointer = useCallback((clientX: number, clientY: number) => {
     const base = baseRef.current;
@@ -51,13 +82,13 @@ export function VirtualControls({
     let dy = clientY - centerY;
     const dist = Math.hypot(dx, dy);
 
-    if (dist > MAX_OFFSET) {
-      dx = (dx / dist) * MAX_OFFSET;
-      dy = (dy / dist) * MAX_OFFSET;
+    if (dist > maxOffset) {
+      dx = (dx / dist) * maxOffset;
+      dy = (dy / dist) * maxOffset;
     }
     setKnobOffset({ x: dx, y: dy });
 
-    const clampedDist = Math.min(dist, MAX_OFFSET);
+    const clampedDist = Math.min(dist, maxOffset);
     const normalizedX = clampedDist > 0 ? dx / clampedDist : 0;
     const normalizedY = clampedDist > 0 ? dy / clampedDist : 0;
 
@@ -67,7 +98,7 @@ export function VirtualControls({
       return;
     }
     onMove({ x: normalizedX, y: normalizedY });
-  }, [onMove]);
+  }, [onMove, maxOffset]);
 
   // IMPORTANT: every handler below calls e.stopPropagation() in addition to
   // e.preventDefault(). These controls are plain HTML elements layered over
@@ -165,8 +196,8 @@ export function VirtualControls({
         onPointerMove={handleJoystickPointerMove}
         onPointerUp={releaseJoystick}
         onPointerCancel={releaseJoystick}
-        className="pointer-events-auto absolute bottom-8 left-8 rounded-full bg-arena-panel/50 backdrop-blur border-2 border-white/20 flex items-center justify-center [touch-action:none]"
-        style={{ width: BASE_SIZE, height: BASE_SIZE }}
+        className="pointer-events-auto absolute bottom-6 left-4 safe-bottom safe-left rounded-full bg-arena-panel/50 backdrop-blur border-2 border-white/20 flex items-center justify-center [touch-action:none]"
+        style={{ width: baseSize, height: baseSize }}
         aria-label="Move joystick"
         role="slider"
         aria-valuenow={0}
@@ -174,8 +205,8 @@ export function VirtualControls({
         <div
           className="rounded-full bg-white/90 border border-white/40 shadow-lg transition-transform"
           style={{
-            width: KNOB_SIZE,
-            height: KNOB_SIZE,
+            width: knobSize,
+            height: knobSize,
             transform: `translate(${knobOffset.x}px, ${knobOffset.y}px)`,
             transitionDuration: dragging ? "0ms" : "120ms",
             opacity: dragging ? 1 : 0.85,
@@ -187,10 +218,16 @@ export function VirtualControls({
       <button
         onPointerDown={handleSlideTap}
         onContextMenu={(e) => e.preventDefault()}
-        className={`pointer-events-auto absolute bottom-14 right-32 w-14 h-14 rounded-full border-2 flex items-center justify-center text-xl font-bold [touch-action:none] transition-colors ${
+        className={`pointer-events-auto absolute bottom-12 safe-bottom safe-right rounded-full border-2 flex items-center justify-center font-bold [touch-action:none] transition-colors ${
           sliding ? "bg-arena-accent border-arena-accent/70 scale-95" : "bg-arena-accent/70 border-white/20"
         }`}
-        style={{ transition: "transform 80ms, background-color 80ms" }}
+        style={{
+          width: slideSize,
+          height: slideSize,
+          right: Math.round(120 * scale),
+          fontSize: Math.round(20 * scale),
+          transition: "transform 80ms, background-color 80ms",
+        }}
         aria-label="Slide"
       >
         💨
@@ -203,12 +240,17 @@ export function VirtualControls({
         onPointerCancel={handleFireUp}
         onPointerLeave={handleFireUp}
         onContextMenu={(e) => e.preventDefault()}
-        className={`pointer-events-auto absolute bottom-10 right-8 w-20 h-20 rounded-full border-2 flex items-center justify-center text-2xl font-bold [touch-action:none] transition-colors ${
+        className={`pointer-events-auto absolute bottom-8 right-4 safe-bottom safe-right rounded-full border-2 flex items-center justify-center font-bold [touch-action:none] transition-colors ${
           firing
             ? "bg-arena-danger border-arena-danger/70 scale-95"
             : "bg-arena-danger/70 border-white/20"
         }`}
-        style={{ transition: "transform 80ms, background-color 80ms" }}
+        style={{
+          width: fireSize,
+          height: fireSize,
+          fontSize: Math.round(24 * scale),
+          transition: "transform 80ms, background-color 80ms",
+        }}
         aria-label="Fire"
       >
         🔥
@@ -222,14 +264,21 @@ export function VirtualControls({
         onPointerLeave={handleBombUp}
         onContextMenu={(e) => e.preventDefault()}
         disabled={bombCount <= 0}
-        className={`pointer-events-auto absolute bottom-32 right-12 w-14 h-14 rounded-full border-2 flex items-center justify-center text-xl font-bold [touch-action:none] transition-colors ${
+        className={`pointer-events-auto absolute safe-bottom safe-right rounded-full border-2 flex items-center justify-center font-bold [touch-action:none] transition-colors ${
           bombCount <= 0
             ? "bg-black/30 border-white/10 opacity-40"
             : aimingBomb
             ? "bg-orange-500 border-orange-300 scale-95"
             : "bg-orange-600/70 border-white/20"
         }`}
-        style={{ transition: "transform 80ms, background-color 80ms" }}
+        style={{
+          width: bombSize,
+          height: bombSize,
+          bottom: Math.round(128 * scale),
+          right: Math.round(48 * scale),
+          fontSize: Math.round(20 * scale),
+          transition: "transform 80ms, background-color 80ms",
+        }}
         aria-label="Throw bomb"
       >
         💣

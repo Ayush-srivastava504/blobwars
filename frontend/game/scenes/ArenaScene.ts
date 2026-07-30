@@ -126,7 +126,8 @@ export interface GameUICallbacks {
   onKillFeed: (text: string) => void;
   onMinimap: (
     self: { x: number; y: number },
-    others: { x: number; y: number; color: number }[]
+    others: { x: number; y: number; color: number }[],
+    crates: { x: number; y: number }[]
   ) => void;
   onWaveUpdate: (data: { wave: number; waveState: string; waveEndsOrStartsAt: number }) => void;
 }
@@ -171,6 +172,16 @@ export class ArenaScene extends Phaser.Scene {
   private bombAiming = false;
   private bombTrajectory?: Phaser.GameObjects.Graphics;
   private selfBombCount = 0;
+
+  // Gun aim reticle — a small crosshair drawn out in front of the player
+  // along the current aimDir, distinct from the mouse cursor itself. On
+  // desktop this doubles the mouse position with clearer "where the barrel
+  // is pointed" feedback; on mobile (no cursor at all) it's the only visual
+  // indication of aim direction, since aimDir there comes from movement/last
+  // touch rather than a pointer on screen. Purely cosmetic — never affects
+  // aimDir, which fireBullet()/positionGunSprite() already read directly.
+  private aimReticle?: Phaser.GameObjects.Graphics;
+  private static readonly AIM_RETICLE_DISTANCE = 70;
 
   private inputSeq = 0;
   private pendingInputs: PendingInput[] = [];
@@ -272,6 +283,7 @@ export class ArenaScene extends Phaser.Scene {
       this.bombKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
     }
     this.bombTrajectory = this.add.graphics().setDepth(50);
+    this.aimReticle = this.add.graphics().setDepth(49);
     const updateAimFromPointer = (pointer: Phaser.Input.Pointer) => {
       if (!this.selfContainer) return;
       const worldPoint = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
@@ -568,6 +580,37 @@ export class ArenaScene extends Phaser.Scene {
     // clear before you commit.
     this.bombTrajectory.lineStyle(2, 0xffa733, 0.5);
     this.bombTrajectory.strokeCircle(endX, endY, 18);
+  }
+
+  /** Draws the small always-on crosshair out in front of the player along aimDir (see aimReticle field comment). */
+  private updateAimReticle() {
+    if (!this.aimReticle) return;
+    this.aimReticle.clear();
+    if (!this.selfContainer) return;
+    const selfPlayer = this.room.state?.players?.get(this.sessionId);
+    if (selfPlayer?.state !== "alive") return;
+
+    const cx = this.selfContainer.x + this.aimDir.x * ArenaScene.AIM_RETICLE_DISTANCE;
+    const cy = this.selfContainer.y + this.aimDir.y * ArenaScene.AIM_RETICLE_DISTANCE;
+
+    this.aimReticle.lineStyle(2, 0xff4f5e, 0.9);
+    this.aimReticle.strokeCircle(cx, cy, 9);
+    this.aimReticle.fillStyle(0xff4f5e, 0.9);
+    this.aimReticle.fillCircle(cx, cy, 2);
+    // Small tick marks (crosshair arms) rather than a full plus, so the
+    // circle+dot combo still reads clearly at small sizes.
+    const armInner = 12;
+    const armOuter = 17;
+    const perpX = -this.aimDir.y;
+    const perpY = this.aimDir.x;
+    for (const sign of [-1, 1]) {
+      this.aimReticle.lineBetween(
+        cx + perpX * armInner * sign,
+        cy + perpY * armInner * sign,
+        cx + perpX * armOuter * sign,
+        cy + perpY * armOuter * sign
+      );
+    }
   }
 
   private spawnExplosionFx(x: number, y: number) {
@@ -1088,6 +1131,7 @@ export class ArenaScene extends Phaser.Scene {
       }
     }
     this.updateBombTrajectory();
+    this.updateAimReticle();
 
     this.emitMinimap();
   }
@@ -1130,7 +1174,11 @@ export class ArenaScene extends Phaser.Scene {
       y: rv.container.y,
       color: this.room.state.players.get(id)?.color ?? 0xffffff,
     }));
-    this.ui.onMinimap({ x: self.x, y: self.y }, others);
+    const crates = Array.from(this.room.state.crates?.values?.() ?? []).map((crate: any) => ({
+      x: crate.x,
+      y: crate.y,
+    }));
+    this.ui.onMinimap({ x: self.x, y: self.y }, others, crates);
   }
 
   private trackFps(delta: number) {
